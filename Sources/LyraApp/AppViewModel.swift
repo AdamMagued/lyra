@@ -279,13 +279,21 @@ public final class AppViewModel: ObservableObject {
         }
 
         Task {
-            if !snapshot.isEngineRunning {
-                await start()
-            }
-            guard snapshot.isEngineRunning else {
+            await start()
+
+            // Asked of the coordinator, not read from `snapshot`.
+            //
+            // `snapshot` is a mirror fed by an async task consuming the coordinator's
+            // stream, and it has not necessarily caught up by the time `start()` returns —
+            // so on the first calibration after launch, which is exactly when the engine
+            // is not running yet, this guard read a stale `false` and cancelled the run
+            // it had just started. The user saw the overlay flash and vanish.
+            guard await coordinator.currentSnapshot.isEngineRunning else {
+                calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then press Start and try again."
                 finishCalibration()
                 return
             }
+
             // Selection is meaningless while the user is being asked to look at dots,
             // and a stray voice command mid-run would move the cursor under them.
             await coordinator.submit(command: .stopTracking)
@@ -333,6 +341,14 @@ public final class AppViewModel: ObservableObject {
                 calibrationInvalidReason = nil
                 persist(map)
                 calibrationError = nil
+
+                // A run that dropped points still fits a map, just from less data than
+                // the user thinks they gave it. Saying so is the difference between "the
+                // calibration is bad" and knowing which run to repeat.
+                let abandoned = capture.abandonedPoints.count
+                if abandoned > 0 {
+                    calibrationError = "\(abandoned) of \(capture.totalPoints) points could not be read cleanly and were left out. Gaze may be less accurate — recalibrate if it feels off."
+                }
             } catch {
                 calibrationError = error.localizedDescription
             }
