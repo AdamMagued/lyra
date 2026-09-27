@@ -353,7 +353,11 @@ public final class AppViewModel: ObservableObject {
             // it had just started. The user saw the overlay flash and vanish.
             guard await coordinator.currentSnapshot.isEngineRunning else {
                 calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then try again."
-                closeCalibration()
+                // Back to the intro rather than out. The intro is the screen that has room
+                // to show the reason; closing the surface instead told the user nothing
+                // about why the thing they clicked did not happen.
+                capture = nil
+                calibrationStage = .intro
                 return
             }
 

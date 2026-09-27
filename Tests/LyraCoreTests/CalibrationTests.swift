@@ -455,6 +455,54 @@ final class CalibrationTests: XCTestCase {
         XCTAssertLessThan(jitteryProgress?.lockQuality ?? 1, 0.5)
     }
 
+    func testAPointWaitsForTheEyeRatherThanTheClock() {
+        // The state machine used to advance purely on elapsed time, which is exactly what
+        // "it goes too fast" was: the dot left after a fixed hold whether or not the user
+        // had arrived at it, and the sample banked was of them still looking elsewhere.
+        let pattern = CalibrationPattern.quick
+        let settle = 0.1
+        let frame = 1.0 / 30.0
+
+        let steady = CalibrationCapture(pattern: pattern, settleDuration: settle, minimumFrames: 3)
+        steady.start(at: 0)
+        var time = 0.0
+        while time <= settle + pattern.holdDuration + frame {
+            _ = steady.update(features: features(0.5), at: time)
+            time += frame
+        }
+        XCTAssertFalse(
+            steady.samples.isEmpty,
+            "an eye that is on the dot should bank the point as soon as the hold is up"
+        )
+
+        let wandering = CalibrationCapture(pattern: pattern, settleDuration: settle, minimumFrames: 3)
+        wandering.start(at: 0)
+        var value = 0.1
+        time = 0.0
+        while time <= settle + pattern.holdDuration {
+            _ = wandering.update(features: features(value), at: time)
+            value = value > 0.5 ? 0.1 : 0.9
+            time += frame
+        }
+        XCTAssertTrue(
+            wandering.samples.isEmpty,
+            "the hold expiring must not bank a point the eye was never on"
+        )
+
+        // And the wait is bounded. Past the timeout the run takes the sample anyway
+        // rather than stalling forever on a point this user cannot settle on, so a noisy
+        // tracker costs a slower calibration rather than none at all.
+        while time <= settle + pattern.holdDuration * 4 {
+            _ = wandering.update(features: features(value), at: time)
+            value = value > 0.5 ? 0.1 : 0.9
+            time += frame
+        }
+        XCTAssertFalse(
+            wandering.samples.isEmpty,
+            "a point that never settles must eventually be taken, not waited on forever"
+        )
+    }
+
     /// Row rank by Gaussian elimination with partial pivoting.
     private func rank(of matrix: [[Double]], epsilon: Double = 1e-9) -> Int {
         guard !matrix.isEmpty else { return 0 }

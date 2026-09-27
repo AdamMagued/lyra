@@ -91,17 +91,20 @@ struct MainDashboardView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isCalibrating)
 
+                // Not gated on the engine running. `beginCalibration` starts it itself, so
+                // requiring the user to press Start first was a rule with no reason behind
+                // it — and it presented as a dead button with nothing saying why.
                 Button("Calibrate") {
                     viewModel.startCalibration()
                 }
                 .buttonStyle(.bordered)
-                .disabled(viewModel.isCalibrating || !snapshot.isEngineRunning)
+                .disabled(viewModel.isCalibrating)
 
                 Button("Quick") {
                     viewModel.startCalibration(quick: true)
                 }
                 .buttonStyle(.bordered)
-                .disabled(viewModel.isCalibrating || !snapshot.isEngineRunning)
+                .disabled(viewModel.isCalibrating)
 
                 Spacer()
 

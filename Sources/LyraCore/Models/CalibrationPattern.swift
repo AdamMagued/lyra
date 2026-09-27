@@ -43,14 +43,19 @@ public struct CalibrationPattern: Sendable {
 
     /// 25 points in a 5x5 grid, inset from the edges, with deterministic jitter.
     ///
-    /// Roughly 40 seconds end to end. That is a real cost, but gaze calibration is done
-    /// once per setup, and a bad calibration costs far more than 40 seconds every time
+    /// Roughly a minute end to end. That is a real cost, but gaze calibration is done
+    /// once per setup, and a bad calibration costs far more than a minute every time
     /// the user tries to click something. The point count is set by the basis: 20 terms
     /// need more than 20 constraints, so 25 it is.
+    ///
+    /// The hold is deliberately slow. The capture cannot move on until the eye has been
+    /// on the target for a while anyway, and a hold shorter than the time it takes to
+    /// find a new dot and settle on it just means every hold completes at the moment the
+    /// user is still arriving.
     public static let standard = CalibrationPattern(
         points: grid(columns: 5, rows: 5, inset: 0.06, jitter: 0.012),
         name: "Standard (25 points)",
-        holdDuration: 1.1
+        holdDuration: 1.6
     )
 
     /// 12 points. Faster, noticeably less accurate at the edges. Offered for people
@@ -58,7 +63,7 @@ public struct CalibrationPattern: Sendable {
     public static let quick = CalibrationPattern(
         points: grid(columns: 4, rows: 3, inset: 0.09, jitter: 0.010),
         name: "Quick (12 points)",
-        holdDuration: 0.9
+        holdDuration: 1.3
     )
 
     /// Held-out points used to *measure* accuracy after fitting, on data the fit never saw.

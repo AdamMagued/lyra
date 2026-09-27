@@ -66,7 +66,7 @@ public final class CalibrationCapture {
 
     /// Time after a target appears before collection begins. Long enough for the saccade
     /// and its correction to settle.
-    public static let defaultSettleDuration: TimeInterval = 0.45
+    public static let defaultSettleDuration: TimeInterval = 0.6
 
     private let settleDuration: TimeInterval
 
@@ -75,6 +75,24 @@ public final class CalibrationCapture {
 
     /// Feature-space spread above which the user is considered not to be holding still.
     private let stabilityTolerance: Double
+
+    /// Lock quality at or above which the user counts as looking at the target at all.
+    /// Shared with the feedback ring, so what the user is told and what the state machine
+    /// acts on cannot drift apart.
+    static let lockedQuality = 0.65
+
+    /// Frames the eye must be on the target, this point, before the hold can complete.
+    ///
+    /// This is the difference between a run that waits for the user and one that leaves
+    /// without them.
+    private let minimumStableFrames: Int
+
+    /// How far past its hold a point will wait for the user, as a multiple of the hold.
+    ///
+    /// Bounds the wait, so a point the user cannot settle on becomes a retry rather than a
+    /// stall. The sample is still finalised when this expires, so a noisy tracker produces
+    /// a slower calibration rather than none.
+    private static let holdTimeoutFactor = 2.5
 
     /// Maximum retries per point before giving up on it.
     private let maximumRetries: Int
@@ -88,6 +106,7 @@ public final class CalibrationCapture {
     private var pointStartedAt: TimeInterval = 0
     private var collected: [(features: GazeFeatures, time: TimeInterval)] = []
     private var recentVectors: [[Double]] = []
+    private var stableFrames = 0
 
     public private(set) var samples: [CalibrationSample] = []
     public private(set) var retryCount = 0
@@ -99,12 +118,14 @@ public final class CalibrationCapture {
         pattern: CalibrationPattern,
         settleDuration: TimeInterval = CalibrationCapture.defaultSettleDuration,
         minimumFrames: Int = 10,
+        minimumStableFrames: Int = 8,
         stabilityTolerance: Double = 0.055,
         maximumRetries: Int = 1
     ) {
         self.pattern = pattern
         self.settleDuration = settleDuration
         self.minimumFrames = minimumFrames
+        self.minimumStableFrames = minimumStableFrames
         self.stabilityTolerance = stabilityTolerance
         self.maximumRetries = maximumRetries
         self.order = Array(pattern.points.indices)
@@ -137,6 +158,7 @@ public final class CalibrationCapture {
         pointStartedAt = time
         collected = []
         recentVectors = []
+        stableFrames = 0
         samples = []
         retriesUsed = [:]
         abandonedPoints = []
@@ -160,6 +182,7 @@ public final class CalibrationCapture {
                 phase = .collecting
                 pointStartedAt = time
                 collected = []
+                stableFrames = 0
             }
             return Progress(
                 pointIndex: position,
@@ -169,7 +192,7 @@ public final class CalibrationCapture {
                 phase: phase,
                 elapsedFraction: 0,
                 lockQuality: lockQuality,
-                isLocked: lockQuality >= 0.65,
+                isLocked: lockQuality >= Self.lockedQuality,
                 retryCount: retryCount
             )
 
@@ -178,18 +201,31 @@ public final class CalibrationCapture {
             if features.isUsable {
                 collected.append((features, time))
             }
+            if lockQuality >= Self.lockedQuality { stableFrames += 1 }
 
-            let fraction = min(elapsed / pattern.holdDuration, 1.0)
-            if fraction < 1.0 {
+            // A point completes when it has been held long enough *and* the eye was
+            // actually on it for enough of that time.
+            //
+            // It used to complete purely on the clock, which is the whole of "it goes too
+            // fast": the dot left after a fixed second whether or not the user had arrived
+            // at it, so the run raced ahead of anyone still finding the target and then
+            // fitted the model to frames of them looking somewhere else.
+            let heldLongEnough = elapsed >= pattern.holdDuration
+            let wasOnTarget = stableFrames >= minimumStableFrames
+            let waitedTooLong = elapsed >= pattern.holdDuration * Self.holdTimeoutFactor
+
+            if !(heldLongEnough && wasOnTarget) && !waitedTooLong {
                 return Progress(
                     pointIndex: position,
                     totalPoints: totalPoints,
                     pointX: point.x,
                     pointY: point.y,
                     phase: .collecting,
-                    elapsedFraction: fraction,
+                    // Never quite completes while the point is still waiting on the eye.
+                    // A full ring next to "keep looking at the dot" reads as a bug.
+                    elapsedFraction: heldLongEnough ? 0.97 : min(elapsed / pattern.holdDuration, 1.0),
                     lockQuality: lockQuality,
-                    isLocked: lockQuality >= 0.65,
+                    isLocked: lockQuality >= Self.lockedQuality,
                     retryCount: retryCount
                 )
             }
@@ -314,6 +350,7 @@ public final class CalibrationCapture {
         position += 1
         collected = []
         recentVectors = []
+        stableFrames = 0
         pointStartedAt = time
 
         if position >= order.count {

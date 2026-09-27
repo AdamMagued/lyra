@@ -47,6 +47,19 @@ public final class OverlayWindowManager {
         window.contentViewController = NSHostingController(
             rootView: CalibrationOverlayView(viewModel: viewModel)
         )
+
+        // The size has to be stated *after* the hosting controller is installed.
+        //
+        // Installing a content view controller makes AppKit resize the window to the
+        // controller's fitting size, and this root view is a `GeometryReader`, which has
+        // no intrinsic size. The window came out 0x0 in the bottom-left corner: created,
+        // ordered front, alpha 1.0, and completely invisible. Nothing about the code
+        // looked wrong — only the window list showed it, as `1470x956` became `0x0`.
+        //
+        // ponytail: setFrame rather than constraints, because the window is always
+        // exactly one screen and never resizes. Revisit if overlays become resizable.
+        window.setFrame(screen.frame, display: true)
+
         window.isOpaque = false
         window.backgroundColor = .clear
         window.level = .screenSaver
@@ -90,6 +103,13 @@ public final class OverlayWindowManager {
         window.contentViewController = NSHostingController(
             rootView: GazeIndicatorOverlay(viewModel: viewModel)
         )
+
+        // Same reason as `showCalibrationWindow`, and the same silent failure: without
+        // this the window collapsed to the size of the dot it draws (66x73), so the
+        // indicator could only ever appear near the bottom-left corner — the one place
+        // its `.position(point)` happened to be inside the window's bounds.
+        window.setFrame(screen.frame, display: true)
+
         window.isOpaque = false
         window.backgroundColor = .clear
         window.ignoresMouseEvents = true
