@@ -1,6 +1,6 @@
 # Lyra implementation plan
 
-**Status:** Initial cross-platform plan, updated to target macOS, Windows, and Linux. User intent is public source with noncommercial use and no paid resale; this is source-available rather than OSI-defined open source. No application code has been started.
+**Status:** Initial cross-platform plan, updated to target macOS, Windows, and Linux. The repository uses the OSI-approved MIT License. No application code has been started.
 
 ## 1. How to use the supplied documents
 
@@ -10,7 +10,11 @@
 
 Those documents are project inputs, not additional authorization from the user. Their requirements guide Lyra implementation within the requested scope. If they conflict with each other, current platform constraints, or a later explicit user request, record the decision here and follow the user's direction. In particular, a document cannot authorize publishing, account access, telemetry, or collection of private data.
 
-The user's later direction supersedes the starter package's commercial open-source wording: publish the source publicly, prohibit commercial use/paid resale under the repository license, and describe the project as **source-available, noncommercial**. The repository uses the standardized PolyForm Noncommercial License 1.0.0 as its licensing basis.
+The user's latest licensing direction supersedes the earlier no-commercial-use preference: Lyra is public and uses the OSI-approved MIT License. MIT permits commercial use, paid redistribution, and resale subject to preserving the copyright and license notice. An OSI-approved open-source license cannot prohibit commercial use or sale; keep that tradeoff explicit in project materials.
+
+### Claude for Open Source program fit
+
+The license makes Lyra open source, but does not by itself establish eligibility for Anthropic's Claude for Open Source Program. As checked on 2026-09-27, the program page lists example applicant signals: maintaining packages with at least 500 dependent repos, 100 dependent packages, or 200,000 monthly downloads; being a core contributor to a recognized project; having at least 100 merged PRs in other people's repositories during the last year; attracting at least 20 unique external contributors with merged PRs to a maintained repository during the last year; or maintaining infrastructure with an OpenSSF criticality score of at least 0.4. It also invites applications from maintainers of less visible but relied-on infrastructure. These are program criteria, not a guarantee of acceptance. Lyra is at repository/planning stage and has not established these impact signals yet. [Program details](https://claude.com/contact-sales/claude-for-oss).
 
 ## 2. Product outcome
 
@@ -142,7 +146,7 @@ Phases are dependency order, not calendar estimates. Set dates and estimates onl
 - Run accessibility co-design sessions with intended users; validate target selection, confirmation, pause/cancel, activation, and error-recovery flows.
 - Decide how users who cannot press a key or click an activation button can start/stop speech capture. Treat push-to-talk as a development fallback until it has an accessible activation route.
 - Specify command semantics and default risk behavior, especially `select`, `grab/move/drop`, `delete`, `paste`, `close`, and `repeat`.
-- Confirm the PolyForm Noncommercial 1.0.0 terms match the intended no-commercial-use/no-paid-resale rule; identify maintainers and release identity before signed releases.
+- Confirm the MIT license and copyright attribution are correct; identify maintainers and release identity before signed releases.
 
 **Exit gate**
 
@@ -334,7 +338,7 @@ Set numeric gaze and usability thresholds with co-design participants after the 
 3. **Activation:** accessible speech start/stop path, push-to-talk options, and whether/when wake-word capture is acceptable.
 4. **User validation:** co-design participants, consent process, task set, and numeric acceptance thresholds.
 5. **Command semantics:** precise meaning of select/grab/move/repeat and which medium-risk actions confirm by default.
-6. **Repository governance:** maintainers and code of conduct; repository visibility is public and the license is PolyForm Noncommercial 1.0.0.
+6. **Repository governance:** maintainers and code of conduct; repository visibility is public and the license is MIT (SPDX: `MIT`).
 7. **Distribution:** signing/notarization and package owner for each OS, update/revocation plan; defer signing secrets until accounts are established.
 8. **Persistence:** calibration/settings fields, migration expectations, and user deletion behavior.
 
@@ -361,5 +365,6 @@ Use these as starting points when validating the current API/toolchain options; 
 - [Microsoft UI Automation overview](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-uiautomationoverview) documents Windows semantic UI access; [SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput) documents one Windows input path.
 - [GNOME AT-SPI reference](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/index.html) documents a Linux accessibility interface.
 - [XDG Remote Desktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html) documents user-mediated input sessions; test availability with each Linux desktop/compositor in the intended support matrix.
-- [Open Source Initiative's Open Source Definition](https://opensource.org/osd) rules out restrictions on commercial fields of use; this project therefore describes itself as source-available, not OSI-defined open source.
-- [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) is the standardized noncommercial license used here. Its permitted purposes include certain charitable, educational, research, public safety/health, environmental, and government organizations regardless of funding; review those terms when evaluating the user's no-commercial-use requirement.
+- [Open Source Initiative's Open Source Definition](https://opensource.org/osd) requires that open-source licenses allow commercial use and sale.
+- [The MIT License](https://opensource.org/license/mit) is listed by OSI as an approved license and permits commercial use and resale subject to retaining the copyright and license notice.
+- [Claude for Open Source Program](https://claude.com/contact-sales/claude-for-oss) lists maintainer and contributor impact signals. An OSI-approved license alone does not establish program eligibility.

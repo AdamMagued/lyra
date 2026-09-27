@@ -1,6 +1,6 @@
 # Lyra — Engineering Package
 
-> This is the original engineering package. Its use of “open source” predates the user's clarified requirement that commercial use and paid resale are prohibited. The current distribution intent is public, source-available, noncommercial; see the repository [LICENSE](../LICENSE) and [implementation plan](IMPLEMENTATION_PLAN.md).
+> This is the original engineering package. Its macOS-only assumptions have been superseded by the cross-platform scope, and the initial noncommercial licensing decision has been superseded by the OSI-approved MIT License. See the repository [LICENSE](../LICENSE) and [implementation plan](IMPLEMENTATION_PLAN.md) for current direction.
 
 This archive contains the initial engineering package for Lyra:
 

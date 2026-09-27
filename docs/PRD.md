@@ -1,10 +1,10 @@
 # Lyra — Product Requirements Document
 
-> **Scope update (2026-09-27):** Lyra targets macOS, Windows, and Linux. This supersedes the macOS-only product scope in the initial engineering package. The user requires public source with commercial use and paid resale prohibited; this is source-available, not OSI-defined open source. See the repository [LICENSE](../LICENSE). Cross-platform requirements and platform decision gates in [the implementation plan](IMPLEMENTATION_PLAN.md) are current; Apple-specific APIs below describe only the macOS adapter unless a later decision says otherwise.
+> **Scope update (2026-09-27):** Lyra targets macOS, Windows, and Linux. This supersedes the macOS-only product scope in the initial engineering package. Lyra is released under the OSI-approved MIT License; commercial use and resale are permitted under its terms. Cross-platform requirements and platform decision gates in [the implementation plan](IMPLEMENTATION_PLAN.md) are current; Apple-specific APIs below describe only the macOS adapter unless a later decision says otherwise.
 
 ## 1. Product
 
-**Lyra** is a public, source-available desktop accessibility layer for macOS, Windows, and Linux that lets users control their computer with **gaze + voice**. Commercial use and paid resale are prohibited by the repository license. Lyra should use platform-appropriate application, permission, accessibility, and input APIs behind shared product behavior.
+**Lyra** is an open-source desktop accessibility layer for macOS, Windows, and Linux that lets users control their computer with **gaze + voice**. Lyra should use platform-appropriate application, permission, accessibility, and input APIs behind shared product behavior.
 
 ### Core interaction model
 

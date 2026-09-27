@@ -21,7 +21,7 @@
 | Dependencies | Swift Package Manager | Native dependency management |
 | Testing | Swift Testing + XCTest | Unit, integration, and platform tests |
 | CI | GitHub Actions | Automated build/test/lint checks |
-| Distribution | Developer ID + notarized DMG initially | Fits system-level permission model and public, noncommercial source distribution |
+| Distribution | Per-platform signing and packaging; notarized DMG is a macOS option | Respect each OS's permission model; release artifacts separately for each supported target |
 | AI | Provider abstraction | Supports local and remote models without coupling the core |
 
 ## 2. Architecture principles
