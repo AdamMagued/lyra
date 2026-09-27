@@ -66,6 +66,19 @@ public struct CalibrationPattern: Sendable {
         holdDuration: 1.3
     )
 
+    /// 16 points in a 4x4 grid, for click-driven calibration.
+    ///
+    /// Coverage matters more than replication here. The fit has ~20 terms, and what
+    /// conditions it is the design matrix spanning the feature space — which needs
+    /// *positions*, including the corners and edges, far more than it needs many repeats
+    /// of the same position. Each of these is clicked several times, which supplies the
+    /// replication; this grid supplies the span.
+    public static let click = CalibrationPattern(
+        points: grid(columns: 4, rows: 4, inset: 0.08, jitter: 0.010),
+        name: "Click (16 points)",
+        holdDuration: 0
+    )
+
     /// Held-out points used to *measure* accuracy after fitting, on data the fit never saw.
     ///
     /// These are offset from the calibration grid intersections on purpose: a validation

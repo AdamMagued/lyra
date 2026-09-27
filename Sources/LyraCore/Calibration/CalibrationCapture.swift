@@ -256,79 +256,17 @@ public final class CalibrationCapture {
     ///
     /// Returns whether a usable sample was produced.
     private func finalisePoint(point: CalibrationPattern.Point, at time: TimeInterval) -> Bool {
-        guard collected.count >= minimumFrames else { return false }
-        guard let usable = rejectOutliers(collected) else { return false }
-
-        let vectors = usable.map(\.features.vector)
-        let count = Double(vectors.count)
-        var means = [Double](repeating: 0, count: GazeFeatures.featureCount)
-        for vector in vectors {
-            for i in 0..<min(vector.count, means.count) { means[i] += vector[i] }
-        }
-        for i in means.indices { means[i] /= count }
-
-        // Spread across the accepted frames, so downstream filtering can prefer samples
-        // that were captured while the user was actually still.
-        var spread = 0.0
-        for vector in vectors {
-            var squared = 0.0
-            for i in 0..<min(vector.count, means.count) {
-                squared += pow(vector[i] - means[i], 2)
-            }
-            spread += squared.squareRoot()
-        }
-        spread /= count
-
-        samples.append(CalibrationSample(
+        guard let sample = CalibrationSample.aggregate(
+            frames: collected.map(\.features),
             targetX: point.x,
             targetY: point.y,
-            features: means,
-            frameCount: vectors.count,
-            featureSpread: spread
-        ))
+            minimumFrames: minimumFrames
+        ) else {
+            return false
+        }
+
+        samples.append(sample)
         return true
-    }
-
-    /// Keeps frames whose feature vector is close to the point's own median.
-    ///
-    /// Median-based rather than mean-based so that a run of frames from a glance away
-    /// cannot drag the reference towards itself and legitimise the very samples we are
-    /// trying to remove.
-    private func rejectOutliers(
-        _ frames: [(features: GazeFeatures, time: TimeInterval)]
-    ) -> [(features: GazeFeatures, time: TimeInterval)]? {
-        guard frames.count >= minimumFrames else { return nil }
-
-        let vectors = frames.map(\.features.vector)
-        var medians = [Double](repeating: 0, count: GazeFeatures.featureCount)
-        for i in 0..<GazeFeatures.featureCount {
-            medians[i] = Self.median(vectors.map { $0[i] })
-        }
-
-        var distances: [Double] = []
-        distances.reserveCapacity(vectors.count)
-        for vector in vectors {
-            var squared = 0.0
-            for i in 0..<GazeFeatures.featureCount {
-                squared += pow(vector[i] - medians[i], 2)
-            }
-            distances.append(squared.squareRoot())
-        }
-
-        let medianDistance = Self.median(distances)
-        let deviations = distances.map { abs($0 - medianDistance) }
-        let mad = Self.median(deviations)
-
-        // With very tight residuals everything is kept; otherwise reject anything more
-        // than three robust deviations out, which is the standard robust-outlier rule.
-        let cutoff = mad > 1e-9 ? medianDistance + 3.0 * mad : max(medianDistance, 1e-9)
-        let kept = zip(frames, distances)
-            .filter { $0.1 <= cutoff }
-            .map(\.0)
-
-        // If pruning was too aggressive to leave a usable point, prefer the raw data
-        // over losing the point entirely.
-        return kept.count >= minimumFrames ? kept : nil
     }
 
     // MARK: - Advancement
@@ -406,14 +344,5 @@ public final class CalibrationCapture {
         spread /= Double(GazeFeatures.featureCount)
 
         return min(max(1.0 - spread / stabilityTolerance, 0.0), 1.0)
-    }
-
-    static func median(_ values: [Double]) -> Double {
-        guard !values.isEmpty else { return 0 }
-        let sorted = values.sorted()
-        let middle = sorted.count / 2
-        return sorted.count % 2 == 0
-            ? (sorted[middle - 1] + sorted[middle]) / 2
-            : sorted[middle]
     }
 }

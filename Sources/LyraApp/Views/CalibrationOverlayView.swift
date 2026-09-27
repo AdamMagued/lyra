@@ -12,14 +12,14 @@ import LyraCore
 /// So there are four acts, and each one answers a question the user actually has:
 ///
 /// - **Intro** — what is this, what will I have to do, how long will it take.
-/// - **Running** — where do I look, how long do I hold, how much is left.
-/// - **Fitting** — the pause after the last dot, which is otherwise indistinguishable
+/// - **Running** — where do I click, how many times, how much is left.
+/// - **Fitting** — the pause after the last click, which is otherwise indistinguishable
 ///   from a hang.
 /// - **Finished** — did it work, and how well.
 struct CalibrationOverlayView: View {
     @ObservedObject var viewModel: AppViewModel
 
-    private var progress: CalibrationCapture.Progress? { viewModel.calibrationProgress }
+    private var progress: ClickCalibration.Progress? { viewModel.calibrationProgress }
 
     var body: some View {
         GeometryReader { geometry in
@@ -35,7 +35,7 @@ struct CalibrationOverlayView: View {
                 case .intro:
                     intro
                 case .running:
-                    if let progress, !progress.isFinished {
+                    if let progress {
                         target(
                             at: CGPoint(
                                 x: progress.pointX * geometry.size.width,
@@ -43,8 +43,6 @@ struct CalibrationOverlayView: View {
                             ),
                             progress: progress
                         )
-                    } else {
-                        waiting
                     }
                 case .fitting:
                     fitting
@@ -52,9 +50,6 @@ struct CalibrationOverlayView: View {
                     result
                 }
 
-                // Only once there is a dot to look at. Before the first frame arrives the
-                // header would be instructing the user to look at something that is not on
-                // screen yet.
                 if viewModel.calibrationStage == .running, progress != nil {
                     VStack {
                         header
@@ -65,6 +60,18 @@ struct CalibrationOverlayView: View {
                 }
             }
             .contentShape(Rectangle())
+            // The whole surface takes the click, not just the dot. A click that lands away
+            // from the dot is a mistake worth telling the user about, and it cannot be told
+            // about if the surface silently swallows it. The run itself decides whether a
+            // click was close enough to count.
+            .onTapGesture(coordinateSpace: .local) { location in
+                viewModel.handleCalibrationClick(
+                    atNormalized: CGPoint(
+                        x: location.x / max(geometry.size.width, 1),
+                        y: location.y / max(geometry.size.height, 1)
+                    )
+                )
+            }
         }
         .ignoresSafeArea()
         .onExitCommand { viewModel.cancelCalibration() }
@@ -84,12 +91,12 @@ struct CalibrationOverlayView: View {
                     "Lyra learns how your eye and head movements map to points on your screen. It measures your face through the camera — nothing is recorded or sent anywhere."
                 )
                 bullet(
-                    "target",
-                    "\(viewModel.calibrationPointCount) targets will appear one at a time. Look at each one and hold your gaze on it until the ring around it fills, then it moves on."
+                    "hand.tap",
+                    "\(viewModel.calibrationPointCount) dots will appear one at a time. Look at the dot, then click it — \(viewModel.calibrationClickCount / viewModel.calibrationPointCount) times each. Your click tells Lyra where you were actually looking, which is what makes it accurate."
                 )
                 bullet(
                     "clock",
-                    "About \(viewModel.calibrationEstimateSeconds) seconds. You can stop at any point with Escape."
+                    "Under a minute. You can stop at any point with Escape."
                 )
                 bullet(
                     "figure.seated.side",
@@ -101,14 +108,6 @@ struct CalibrationOverlayView: View {
                 Button("Begin") { viewModel.beginCalibration() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-
-                Button("Quick version (\(CalibrationPattern.quick.points.count) targets, ~\(Int(CalibrationCapture.estimatedDuration(for: .quick).rounded()))s)") {
-                    // `startCalibration` is safe to call while already on the intro — it
-                    // just replaces the offered pattern — and going through it again keeps
-                    // the window from being torn down and rebuilt under the user.
-                    viewModel.startCalibration(quick: true)
-                }
-                .buttonStyle(.bordered)
 
                 Button("Cancel") { viewModel.cancelCalibration() }
                     .buttonStyle(.bordered)
@@ -143,15 +142,15 @@ struct CalibrationOverlayView: View {
 
     // MARK: - Running
 
-    /// Diameter of the solid disc the user looks at.
+    /// Diameter of the solid disc the user clicks.
     ///
     /// Sized to be findable from a normal sitting distance without hunting. The old 9-point
     /// dot was legible only if you were already looking straight at it, which is the one
     /// thing a user mid-calibration cannot rely on.
     private let targetDiameter: CGFloat = 46
 
-    private func target(at position: CGPoint, progress: CalibrationCapture.Progress) -> some View {
-        let collecting = progress.phase == .collecting
+    private func target(at position: CGPoint, progress: ClickCalibration.Progress) -> some View {
+        let done = Double(progress.clicksForPoint) / Double(max(progress.clicksPerPoint, 1))
 
         return ZStack {
             // Soft glow so the target is findable in peripheral vision, which is how the
@@ -160,7 +159,7 @@ struct CalibrationOverlayView: View {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [Color.white.opacity(collecting ? 0.20 : 0.10), .clear],
+                        colors: [Color.white.opacity(0.18), .clear],
                         center: .center,
                         startRadius: 10,
                         endRadius: 140
@@ -168,25 +167,23 @@ struct CalibrationOverlayView: View {
                 )
                 .frame(width: 280, height: 280)
 
-            // Progress ring: how long to keep holding. Carried on the target itself rather
+            // How many of this dot's clicks are in. Carried on the target itself rather
             // than in a corner, so the user never has to look away from the thing they are
-            // supposed to be looking at.
+            // supposed to be clicking.
             Circle()
                 .stroke(Color.white.opacity(0.18), lineWidth: 7)
                 .frame(width: 132, height: 132)
 
             Circle()
-                .trim(from: 0, to: progress.elapsedFraction)
-                .stroke(
-                    progress.isLocked ? Color.green : Color.accentColor,
-                    style: StrokeStyle(lineWidth: 7, lineCap: .round)
-                )
+                .trim(from: 0, to: done)
+                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 7, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .frame(width: 132, height: 132)
-                .animation(.linear(duration: 0.1), value: progress.elapsedFraction)
+                .animation(.easeOut(duration: 0.18), value: done)
 
             // Crosshair ticks. They make the exact spot unambiguous at a glance, which a
-            // lone disc does not — its centre has to be inferred.
+            // lone disc does not — its centre has to be inferred, and the click has to land
+            // within tolerance of it.
             ForEach(0..<4, id: \.self) { index in
                 Capsule()
                     .fill(Color.white.opacity(0.9))
@@ -195,28 +192,26 @@ struct CalibrationOverlayView: View {
                     .rotationEffect(.degrees(Double(index) * 90))
             }
 
-            // The target itself. Solid while collecting, hollow while the eye is still
-            // travelling, so the two phases are distinguishable without reading anything.
             Circle()
-                .fill(collecting ? Color.white : Color.white.opacity(0.25))
+                .fill(Color.white)
                 .frame(width: targetDiameter, height: targetDiameter)
                 .overlay(Circle().stroke(Color.black.opacity(0.65), lineWidth: 3))
-
-            Circle()
-                .fill(Color.accentColor)
-                .frame(width: collecting ? 12 : 0, height: collecting ? 12 : 0)
+                .overlay(
+                    Text("\(progress.clicksForPoint)/\(progress.clicksPerPoint)")
+                        .font(.system(size: 15, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.black.opacity(0.75))
+                )
         }
         .position(position)
-        .animation(.easeOut(duration: 0.18), value: collecting)
     }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("Look at the white dot")
+            Text("Look at the dot, then click it")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
 
-            Text("Hold your gaze on it until the ring completes")
+            Text("Keep your eyes on the dot while you click — that is what it learns from")
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.65))
 
@@ -239,18 +234,12 @@ struct CalibrationOverlayView: View {
                 overallProgressBar(progress)
             }
 
-            if let progress, progress.retryCount > 0 {
-                Text("Repeating \(progress.retryCount) point\(progress.retryCount == 1 ? "" : "s") — that one was not read cleanly")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            }
-
             HStack(spacing: 16) {
-                statusPill(progress)
-
-                Button("This one was bad") { viewModel.retryCurrentPoint() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                if let progress {
+                    Text("\(progress.samplesCollected) of \(viewModel.calibrationClickCount) clicks recorded")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
 
                 Button("Cancel") { viewModel.cancelCalibration() }
                     .buttonStyle(.bordered)
@@ -263,11 +252,10 @@ struct CalibrationOverlayView: View {
         .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// How much of the whole run is left. The dot count alone does not convey that 25
-    /// points is most of a minute of sitting still, and a user who cannot see the end of a
-    /// task assumes it is stuck.
-    private func overallProgressBar(_ progress: CalibrationCapture.Progress) -> some View {
-        let fraction = Double(progress.pointIndex) / Double(max(progress.totalPoints, 1))
+    /// How much of the whole run is left. The dot count alone does not convey how much
+    /// clicking is left, and a user who cannot see the end of a task assumes it is stuck.
+    private func overallProgressBar(_ progress: ClickCalibration.Progress) -> some View {
+        let fraction = Double(progress.samplesCollected) / Double(max(viewModel.calibrationClickCount, 1))
         return ZStack(alignment: .leading) {
             Capsule().fill(Color.white.opacity(0.18))
             GeometryReader { geometry in
@@ -279,43 +267,7 @@ struct CalibrationOverlayView: View {
         .frame(width: 260, height: 6)
     }
 
-    private func statusPill(_ progress: CalibrationCapture.Progress?) -> some View {
-        let text: String
-        let colour: Color
-        switch progress?.phase {
-        case .settling:
-            // Says what to do next, not what the system is doing. "Settling" describes an
-            // implementation detail the user has no use for and cannot act on.
-            text = "Get ready…"
-            colour = .white.opacity(0.6)
-        case .collecting:
-            text = progress?.isLocked == true ? "Good — hold it" : "Keep looking at the dot"
-            colour = progress?.isLocked == true ? .green : .white.opacity(0.75)
-        default:
-            text = "Starting…"
-            colour = .white.opacity(0.6)
-        }
-        return Text(text)
-            .font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(colour.opacity(0.18), in: Capsule())
-            .foregroundStyle(colour)
-    }
-
     // MARK: - Pauses and outcomes
-
-    private var waiting: some View {
-        panel {
-            ProgressView().controlSize(.large)
-            Text(viewModel.snapshot.trackingState.description)
-                .font(.headline)
-                .foregroundStyle(.white)
-            Text("Waiting for the camera — make sure your face is lit and inside the frame.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.7))
-        }
-    }
 
     private var fitting: some View {
         panel {
@@ -350,13 +302,13 @@ struct CalibrationOverlayView: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("\(result.usedPoints) of \(result.totalPoints) targets were used.")
+                Text("\(result.usedPoints) of \(result.totalPoints) clicks were used.")
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.6))
 
                 if result.abandonedPoints > 0 {
                     Label(
-                        "\(result.abandonedPoints) could not be read cleanly and were left out. Try again if gaze feels off — better lighting helps most.",
+                        "\(result.abandonedPoints) click\(result.abandonedPoints == 1 ? "" : "s") could not be used — either they missed the dot or the camera lost your eyes at that moment.",
                         systemImage: "exclamationmark.triangle"
                     )
                     .font(.system(size: 12))
@@ -394,9 +346,6 @@ struct CalibrationOverlayView: View {
     private func verdict(for result: CalibrationAppResult) -> String {
         if result.isPrecise {
             return "Gaze should land where you look. You can turn on selection and try it."
-        }
-        if result.isQuick {
-            return "The quick run covers less of the screen, so the edges will be the least accurate. Run the full calibration from the dashboard if pointing near the edges misbehaves."
         }
         return "That is looser than it should be. Dim rooms, sitting further back than usual, or a lot of head movement during the run all cost accuracy — it is worth another go."
     }

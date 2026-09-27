@@ -18,10 +18,13 @@ struct LyraApp: App {
 
             Divider()
 
-            Button("Calibrate…") { viewModel.startCalibration() }
-                .disabled(!viewModel.snapshot.isEngineRunning)
-            Button("Recalibrate (quick)") { viewModel.startCalibration(quick: true) }
-                .disabled(!viewModel.snapshot.isEngineRunning)
+            // Ungated, like the dashboard button: `beginCalibration` starts the engine
+            // itself, so gating it only ever produced a menu item that did nothing and
+            // said nothing about why.
+            Button(viewModel.isCalibrated ? "Recalibrate…" : "Calibrate…") {
+                viewModel.startCalibration()
+            }
+            .disabled(viewModel.isCalibrating)
 
             Divider()
 

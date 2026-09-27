@@ -26,7 +26,7 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var previewImage: CGImage?
 
     @Published public private(set) var calibrationStage: CalibrationStage = .idle
-    @Published public private(set) var calibrationProgress: CalibrationCapture.Progress?
+    @Published public private(set) var calibrationProgress: ClickCalibration.Progress?
     @Published public private(set) var calibrationError: String?
     @Published public private(set) var calibrationResult: CalibrationResult?
 
@@ -52,8 +52,9 @@ public final class AppViewModel: ObservableObject {
         public let errorPixels: Double
         public let usedPoints: Int
         public let totalPoints: Int
+        /// Clicks the run refused. Either they landed away from the dot, or there was no
+        /// trustworthy eye measurement behind them to label with.
         public let abandonedPoints: Int
-        public let isQuick: Bool
 
         /// Whether the fit came out tight enough to point at things with. Roughly the
         /// height of a line of text — below this, gaze lands where the user intended; far
@@ -66,19 +67,17 @@ public final class AppViewModel: ObservableObject {
         calibrationStage == .intro || calibrationStage == .running || calibrationStage == .fitting
     }
 
-    /// Which pattern the intro screen is offering.
-    @Published public private(set) var calibrationPatternName = CalibrationPattern.standard.name
+    /// What the intro screen is offering. Click-driven is the only flow now: it labels
+    /// every sample with a real screen position instead of inferring one, so there is
+    /// nothing left for a second, slower pattern to be better at.
+    public var calibrationPointCount: Int { CalibrationPattern.click.points.count }
 
-    /// Roughly how long the offered run will take, in seconds.
-    public var calibrationEstimateSeconds: Int {
-        guard let pendingPattern else { return 0 }
-        return Int(CalibrationCapture.estimatedDuration(for: pendingPattern).rounded())
+    /// How many clicks the offered run asks for in total.
+    public var calibrationClickCount: Int {
+        calibrationPointCount * Self.clicksPerPoint
     }
 
-    /// How many targets the offered run will show.
-    public var calibrationPointCount: Int { pendingPattern?.points.count ?? 0 }
-
-    private var pendingPattern: CalibrationPattern?
+    static let clicksPerPoint = 4
 
     @Published public private(set) var cameraGranted = false
     @Published public private(set) var microphoneGranted = false
@@ -149,11 +148,9 @@ public final class AppViewModel: ObservableObject {
 
     private let overlays = OverlayWindowManager.shared
     private let calibrationStorageKey = "com.lyra.calibrationMap"
-    private var capture: CalibrationCapture?
+    private var clickRun: ClickCalibration?
     private var snapshotTask: Task<Void, Never>?
     private var displayObserver: NSObjectProtocol?
-
-    private static let patterns: [CalibrationPattern] = [.standard, .quick]
 
     public init() {
         let gaze = VisionGazeProvider()
@@ -308,9 +305,7 @@ public final class AppViewModel: ObservableObject {
     // MARK: - Calibration
 
     /// Opens the calibration surface on its explanation screen. Nothing is measured yet.
-    public func startCalibration(quick: Bool = false) {
-        pendingPattern = quick ? CalibrationPattern.quick : CalibrationPattern.standard
-        calibrationPatternName = pendingPattern?.name ?? CalibrationPattern.standard.name
+    public func startCalibration() {
         calibrationError = nil
         calibrationProgress = nil
         calibrationResult = nil
@@ -320,25 +315,22 @@ public final class AppViewModel: ObservableObject {
 
     /// Begins measuring, once the user has read what is about to happen and is ready.
     ///
-    /// Split from `startCalibration` because the run needs the user settled and looking at
-    /// the screen. Starting the instant the button is pressed means the first points are
-    /// measured while they are still reading the button they just clicked.
+    /// Split from `startCalibration` because starting the instant the button is pressed
+    /// means the first clicks land while the user is still reading the button they just
+    /// clicked.
     public func beginCalibration() {
-        guard calibrationStage == .intro, let pattern = pendingPattern else { return }
-        let run = CalibrationCapture(pattern: pattern)
-        capture = run
+        guard calibrationStage == .intro else { return }
+        let run = ClickCalibration(clicksPerPoint: Self.clicksPerPoint)
+        clickRun = run
         calibrationStage = .running
+        calibrationProgress = run.progress
 
         // Built outside the task below so the observer holds `self` weakly without
         // fighting the strong capture the surrounding task already has. The coordinator
         // is owned by this view model, so a strong self here would be a genuine cycle
         // for as long as the observer is installed.
         let observer: @Sendable (GazeFeatures) -> Void = { [weak self] features in
-            // Timestamped here, on the capture thread, not after the hop to the main
-            // actor: the state machine's settle and hold timings have to reflect when the
-            // frame was actually measured, not when the UI got round to it.
-            let now = ProcessInfo.processInfo.systemUptime
-            Task { @MainActor [weak self] in self?.ingest(features, at: now) }
+            Task { @MainActor [weak self] in self?.ingest(features) }
         }
 
         Task {
@@ -356,52 +348,64 @@ public final class AppViewModel: ObservableObject {
                 // Back to the intro rather than out. The intro is the screen that has room
                 // to show the reason; closing the surface instead told the user nothing
                 // about why the thing they clicked did not happen.
-                capture = nil
+                clickRun = nil
                 calibrationStage = .intro
                 return
             }
 
-            // Selection is meaningless while the user is being asked to look at dots,
-            // and a stray voice command mid-run would move the cursor under them.
+            // Selection is meaningless while the user is calibrating, and a stray voice
+            // command mid-run would move the cursor out from under the dot they are
+            // trying to click — the click is the label, so that would corrupt the run.
             await coordinator.submit(command: .stopTracking)
             await coordinator.setFeatureObserver(observer)
-            run.start(at: ProcessInfo.processInfo.systemUptime)
+            run.start()
+            calibrationProgress = run.progress
         }
     }
 
-    private func ingest(_ features: GazeFeatures, at time: TimeInterval) {
-        guard isCalibrating, let capture else { return }
+    /// Records a click on the calibration surface.
+    ///
+    /// - Parameter location: where the click landed, normalised 0...1 with the origin at
+    ///   the top-left of the surface.
+    public func handleCalibrationClick(atNormalized location: CGPoint) {
+        guard calibrationStage == .running, let run = clickRun else { return }
 
-        guard let progress = capture.update(features: features, at: time) else { return }
-        calibrationProgress = progress
+        run.registerClick(
+            atNormalized: (x: Double(location.x), y: Double(location.y)),
+            screenSize: LyraSize(
+                width: Double(NSScreen.main?.frame.width ?? 1512),
+                height: Double(NSScreen.main?.frame.height ?? 982)
+            )
+        )
+        calibrationProgress = run.progress
 
-        if progress.isFinished {
-            completeCalibration(with: capture)
+        if run.isFinished {
+            completeCalibration(with: run)
         }
     }
 
-    /// Marks the current point as bad and makes the run go back to it.
-    public func retryCurrentPoint() {
-        guard isCalibrating, let capture else { return }
-        capture.flagCurrentPointForRetry(at: ProcessInfo.processInfo.systemUptime)
+    private func ingest(_ features: GazeFeatures) {
+        guard isCalibrating, let run = clickRun else { return }
+        run.observe(features: features)
     }
 
-    private func completeCalibration(with capture: CalibrationCapture) {
+    private func completeCalibration(with run: ClickCalibration) {
         let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
         // Captured before the fit rather than after, and before the await below: this is
         // the setup the samples were actually taken in, and `activeCameraID` is only
         // populated once the camera has started.
         let context = currentCalibrationContext
+        let samples = run.samples
+        let refused = run.rejectedClicks + run.droppedClicks
+        let totalClicks = run.totalClicks
 
         Task {
             calibrationStage = .fitting
             await coordinator.setFeatureObserver(nil)
 
-            let isQuick = pendingPattern?.name == CalibrationPattern.quick.name
-
             do {
                 let map = try GazeCalibrator().calibrate(
-                    samples: capture.samples,
+                    samples: samples,
                     screenWidth: Double(size.width),
                     screenHeight: Double(size.height),
                     context: context
@@ -411,24 +415,23 @@ public final class AppViewModel: ObservableObject {
                 calibrationInvalidReason = nil
                 persist(map)
                 calibrationError = nil
-                writeDiagnosticsIfRequested(samples: capture.samples, screen: size, errorPixels: map.validationErrorPixels)
+                writeDiagnosticsIfRequested(samples: samples, screen: size, errorPixels: map.validationErrorPixels)
 
-                // A run that dropped points still fits a map, just from less data than
-                // the user thinks they gave it. The result screen says so, because that
-                // is the difference between "the calibration is bad" and knowing which
-                // run to repeat.
+                // A run that dropped clicks still fits a map, just from less data than the
+                // user thinks they gave it. The result screen says so, because that is the
+                // difference between "the calibration is bad" and knowing which run to
+                // repeat.
                 calibrationResult = CalibrationResult(
                     errorPixels: map.validationErrorPixels,
                     usedPoints: map.pointCount,
-                    totalPoints: capture.totalPoints,
-                    abandonedPoints: capture.abandonedPoints.count,
-                    isQuick: isQuick
+                    totalPoints: totalClicks,
+                    abandonedPoints: refused
                 )
             } catch {
                 calibrationError = error.localizedDescription
             }
 
-            self.capture = nil
+            clickRun = nil
             calibrationStage = .finished
             refreshPermissions()
         }
@@ -442,18 +445,16 @@ public final class AppViewModel: ObservableObject {
     /// Dismisses the calibration surface and returns the engine to normal use.
     public func closeCalibration() {
         calibrationStage = .idle
-        capture = nil
+        clickRun = nil
         calibrationProgress = nil
-        pendingPattern = nil
         overlays.closeCalibrationWindow()
         Task { await coordinator.setFeatureObserver(nil) }
     }
 
-    /// Runs another calibration immediately, using the same pattern.
+    /// Runs another calibration immediately.
     public func repeatCalibration() {
-        let quick = pendingPattern?.name == CalibrationPattern.quick.name
         closeCalibration()
-        startCalibration(quick: quick)
+        startCalibration()
     }
 
     public func resetCalibration() {
@@ -490,7 +491,7 @@ public final class AppViewModel: ObservableObject {
             "screenHeight": Double(screen.height),
             "errorPixels": errorPixels,
             "sampleCount": samples.count,
-            "patternPoints": pendingPattern?.points.count ?? 0,
+            "patternPoints": CalibrationPattern.click.points.count,
             "features": summaries.map { summary -> [String: Any] in
                 [
                     "name": summary.name,
