@@ -12,9 +12,10 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 
-# Swift Package Manager
+# Swift Package Manager & Builds
 .build/
 .swiftpm/
+build/
 
 # Local secrets and environment files
 .env

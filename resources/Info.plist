@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>LyraApp</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.lyra.LyraApp</string>
+    <key>CFBundleName</key>
+    <string>Lyra</string>
+    <key>CFBundleDisplayName</key>
+    <string>Lyra</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Lyra uses your camera for real-time face and eye tracking to navigate the screen cursor.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Lyra uses your microphone to listen for voice commands such as 'cursor' to activate tracking.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Lyra uses speech recognition to parse deterministic commands like 'cursor', 'click', and 'stop'.</string>
+</dict>
+</plist>
