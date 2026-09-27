@@ -98,7 +98,9 @@ public struct FaceFeatureExtractor: Sendable {
 
     // MARK: - Eye geometry
 
-    private struct EyeMeasurement {
+    /// Internal, not private, because `eyeGeometry` returns it and that has to be
+    /// reachable from tests.
+    struct EyeMeasurement {
         /// Pupil position along the corner-to-corner axis, 0 (one corner) to 1 (the other).
         let normalizedX: Double
         /// Pupil position perpendicular to that axis, 0 (lower lid) to 1 (upper lid).
@@ -111,7 +113,11 @@ public struct FaceFeatureExtractor: Sendable {
     ///
     /// The frame's axes come from the eye contour's own corners, so the whole measurement
     /// rotates with the head and cancels roll.
-    private func eyeGeometry(
+    ///
+    /// Internal rather than private so the geometry can be tested without a camera. It is
+    /// the part of the pipeline most likely to break silently: see the note on the
+    /// perpendicular divisor below.
+    func eyeGeometry(
         contour: [CGPoint],
         pupil: CGPoint?,
         boundingBox: CGRect
@@ -127,12 +133,17 @@ public struct FaceFeatureExtractor: Sendable {
         let toPupilX = Double(pupil.x - cornerA.x)
         let toPupilY = Double(pupil.y - cornerA.y)
 
-        // Projection onto the corner axis gives horizontal eye-in-head position.
+        // Projection onto the corner axis, as a fraction of that axis.
         let along = (toPupilX * axisX + toPupilY * axisY) / axisLengthSquared
 
-        // The perpendicular component is the vertical signal. Because the contour is
-        // stored in face-relative space it must be normalised by the eye's own height,
-        // measured in that same space.
+        // The perpendicular component. Dividing by the *square* of the axis length is
+        // correct here, and is easy to mistake for a bug: `perpendicularExtent` also
+        // divides its offsets by the axis length and then projects onto an already-unit
+        // axis, so its extents come out in units of `perpDistance / axisLength` too.
+        // Both sides of the subtraction below are in that unit, and the ratio is a clean
+        // 0...1 fraction of the eye's opening. Dividing by `axisLength` instead shrinks
+        // the numerator by `1/axisLength` (~5x for a real eye) and squashes all vertical
+        // travel into the middle of the range.
         let axisLength = axisLengthSquared.squareRoot()
         let perpendicular = (toPupilX * -axisY + toPupilY * axisX) / axisLengthSquared
 

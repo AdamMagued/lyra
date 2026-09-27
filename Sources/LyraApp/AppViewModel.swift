@@ -411,6 +411,7 @@ public final class AppViewModel: ObservableObject {
                 calibrationInvalidReason = nil
                 persist(map)
                 calibrationError = nil
+                writeDiagnosticsIfRequested(samples: capture.samples, screen: size, errorPixels: map.validationErrorPixels)
 
                 // A run that dropped points still fits a map, just from less data than
                 // the user thinks they gave it. The result screen says so, because that
@@ -464,6 +465,49 @@ public final class AppViewModel: ObservableObject {
     private func persist(_ map: CalibrationMap) {
         guard let data = try? JSONEncoder().encode(map) else { return }
         UserDefaults.standard.set(data, forKey: calibrationStorageKey)
+    }
+
+    /// Writes a summary of the last run, but only when explicitly asked for.
+    ///
+    /// A bad calibration number cannot say whether the measurements carried no gaze
+    /// signal or carried a noisy one, and those need opposite fixes. This exists to tell
+    /// the two apart.
+    ///
+    /// Gated on an environment variable rather than always on, because it is a
+    /// diagnostic and not a feature: gaze measurements should not be landing on disk as a
+    /// side effect of using the app. It writes aggregate statistics — ranges, deviations,
+    /// correlations — never the measurements themselves.
+    private func writeDiagnosticsIfRequested(
+        samples: [CalibrationSample],
+        screen: CGSize,
+        errorPixels: Double
+    ) {
+        guard ProcessInfo.processInfo.environment["LYRA_CALIBRATION_DIAGNOSTICS"] == "1" else { return }
+
+        let summaries = CalibrationDiagnostics.summarise(samples)
+        var report: [String: Any] = [
+            "screenWidth": Double(screen.width),
+            "screenHeight": Double(screen.height),
+            "errorPixels": errorPixels,
+            "sampleCount": samples.count,
+            "patternPoints": pendingPattern?.points.count ?? 0,
+            "features": summaries.map { summary -> [String: Any] in
+                [
+                    "name": summary.name,
+                    "min": summary.minimum,
+                    "max": summary.maximum,
+                    "range": summary.range,
+                    "std": summary.standardDeviation,
+                    "correlationWithX": summary.correlationWithX,
+                    "correlationWithY": summary.correlationWithY
+                ]
+            }
+        ]
+        report["frameCounts"] = samples.map(\.frameCount)
+        report["featureSpreads"] = samples.map(\.featureSpread)
+
+        guard let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]) else { return }
+        try? data.write(to: URL(fileURLWithPath: "/tmp/lyra-calibration-diagnostics.json"))
     }
 
     private func restoreCalibration() async {

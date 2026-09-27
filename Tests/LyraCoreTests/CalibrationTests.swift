@@ -543,13 +543,60 @@ private extension GazeFeatures {
             confidence: confidence, timestamp: timestamp
         )
     }
+
+    // MARK: - Diagnostics
+
+    func testDiagnosticsRankFeaturesByHowMuchGazeTheyCarry() {
+        // The point of the summary: it has to separate "this feature does not move with
+        // gaze" from "this feature moves, but noisily". Distance from the screen centre
+        // is a perfect stand-in for a feature that tracks gaze and a poor one for a
+        // feature that does not.
+        let points: [(Double, Double)] = [0.1, 0.5, 0.9].flatMap { x in
+            [0.1, 0.5, 0.9].map { y in (x, y) }
+        }
+        let samples = points.enumerated().map { index, point -> CalibrationSample in
+            var features = [Double](repeating: 0.5, count: GazeFeatures.featureCount)
+            // A feature that follows the target exactly...
+            features[0] = (point.0 + point.1) / 2
+            // ...and one that is pure noise with no relation to it.
+            features[1] = index.isMultiple(of: 2) ? 0.2 : 0.8
+            return CalibrationSample(
+                targetX: point.0, targetY: point.1,
+                features: features, frameCount: 30, featureSpread: 0.01
+            )
+        }
+
+        let summaries = CalibrationDiagnostics.summarise(samples)
+        XCTAssertEqual(summaries.count, GazeFeatures.featureCount)
+        XCTAssertEqual(summaries[0].name, "pupilX")
+
+        let tracking = summaries[0]
+        XCTAssertGreaterThan(tracking.strongestCorrelation, 0.9)
+        XCTAssertGreaterThan(tracking.range, 0.5)
+
+        // The alternating feature correlates with nothing, so it must not be reported as
+        // carrying gaze merely for having a wide range.
+        let noisy = summaries[1]
+        XCTAssertGreaterThan(noisy.range, 0.5)
+        XCTAssertLessThan(noisy.strongestCorrelation, 0.3)
+
+        // A feature that never varies at all is the clearest possible "no signal".
+        XCTAssertEqual(summaries[8].range, 0.0, accuracy: 1e-12)
+        XCTAssertEqual(summaries[8].strongestCorrelation, 0.0, accuracy: 1e-12)
+    }
+
+    func testCorrelationIsZeroRatherThanUndefinedForAConstantInput() {
+        let constant = [Double](repeating: 0.5, count: 10)
+        let varying = (0..<10).map { Double($0) }
+        XCTAssertEqual(CalibrationDiagnostics.correlation(constant, varying), 0)
+        XCTAssertEqual(CalibrationDiagnostics.correlation(varying, constant), 0)
+    }
 }
 
 /// A small deterministic generator, so a noisy fixture still produces the same numbers
 /// on every run. `SystemRandomNumberGenerator` would make a failure impossible to
 /// reproduce, which is the one thing a failing test has to be.
-private struct SeededGenerator: RandomNumberGenerator {
-    private var state: UInt64
+private struct SeededGenerator: RandomNumberGenerator {    private var state: UInt64
 
     init(seed: UInt64) {
         state = seed == 0 ? 0x9E3779B97F4A7C15 : seed
