@@ -25,9 +25,60 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var snapshot = LyraSnapshot()
     @Published public private(set) var previewImage: CGImage?
 
-    @Published public private(set) var isCalibrating = false
+    @Published public private(set) var calibrationStage: CalibrationStage = .idle
     @Published public private(set) var calibrationProgress: CalibrationCapture.Progress?
     @Published public private(set) var calibrationError: String?
+    @Published public private(set) var calibrationResult: CalibrationResult?
+
+    /// Where the user is in the calibration flow.
+    ///
+    /// Calibration used to have no first act and no last one: pressing Calibrate threw the
+    /// user straight at a dot with no warning, and when the run ended the surface closed
+    /// itself with the outcome reported as a line of status text on a window they were no
+    /// longer looking at. Both ends of a task you cannot see the edges of read as a
+    /// malfunction.
+    public enum CalibrationStage: Equatable {
+        case idle
+        /// Explaining what is about to happen, before anything starts.
+        case intro
+        case running
+        /// Run complete; the model is being fitted.
+        case fitting
+        /// Showing the outcome and how good it is.
+        case finished
+    }
+
+    public struct CalibrationResult: Equatable {
+        public let errorPixels: Double
+        public let usedPoints: Int
+        public let totalPoints: Int
+        public let abandonedPoints: Int
+        public let isQuick: Bool
+
+        /// Whether the fit came out tight enough to point at things with. Roughly the
+        /// height of a line of text — below this, gaze lands where the user intended; far
+        /// above it, the lens is doing all the work.
+        public var isPrecise: Bool { errorPixels <= 70 }
+    }
+
+    /// True while a calibration surface is up and the engine is not available to selection.
+    public var isCalibrating: Bool {
+        calibrationStage == .intro || calibrationStage == .running || calibrationStage == .fitting
+    }
+
+    /// Which pattern the intro screen is offering.
+    @Published public private(set) var calibrationPatternName = CalibrationPattern.standard.name
+
+    /// Roughly how long the offered run will take, in seconds.
+    public var calibrationEstimateSeconds: Int {
+        guard let pendingPattern else { return 0 }
+        return Int(CalibrationCapture.estimatedDuration(for: pendingPattern).rounded())
+    }
+
+    /// How many targets the offered run will show.
+    public var calibrationPointCount: Int { pendingPattern?.points.count ?? 0 }
+
+    private var pendingPattern: CalibrationPattern?
 
     @Published public private(set) var cameraGranted = false
     @Published public private(set) var microphoneGranted = false
@@ -256,15 +307,27 @@ public final class AppViewModel: ObservableObject {
 
     // MARK: - Calibration
 
+    /// Opens the calibration surface on its explanation screen. Nothing is measured yet.
     public func startCalibration(quick: Bool = false) {
-        let pattern = quick ? CalibrationPattern.quick : CalibrationPattern.standard
-        let run = CalibrationCapture(pattern: pattern)
-        capture = run
+        pendingPattern = quick ? CalibrationPattern.quick : CalibrationPattern.standard
+        calibrationPatternName = pendingPattern?.name ?? CalibrationPattern.standard.name
         calibrationError = nil
         calibrationProgress = nil
-        isCalibrating = true
-
+        calibrationResult = nil
+        calibrationStage = .intro
         overlays.showCalibrationWindow(viewModel: self)
+    }
+
+    /// Begins measuring, once the user has read what is about to happen and is ready.
+    ///
+    /// Split from `startCalibration` because the run needs the user settled and looking at
+    /// the screen. Starting the instant the button is pressed means the first points are
+    /// measured while they are still reading the button they just clicked.
+    public func beginCalibration() {
+        guard calibrationStage == .intro, let pattern = pendingPattern else { return }
+        let run = CalibrationCapture(pattern: pattern)
+        capture = run
+        calibrationStage = .running
 
         // Built outside the task below so the observer holds `self` weakly without
         // fighting the strong capture the surrounding task already has. The coordinator
@@ -289,8 +352,8 @@ public final class AppViewModel: ObservableObject {
             // is not running yet, this guard read a stale `false` and cancelled the run
             // it had just started. The user saw the overlay flash and vanish.
             guard await coordinator.currentSnapshot.isEngineRunning else {
-                calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then press Start and try again."
-                finishCalibration()
+                calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then try again."
+                closeCalibration()
                 return
             }
 
@@ -327,7 +390,10 @@ public final class AppViewModel: ObservableObject {
         let context = currentCalibrationContext
 
         Task {
+            calibrationStage = .fitting
             await coordinator.setFeatureObserver(nil)
+
+            let isQuick = pendingPattern?.name == CalibrationPattern.quick.name
 
             do {
                 let map = try GazeCalibrator().calibrate(
@@ -343,33 +409,46 @@ public final class AppViewModel: ObservableObject {
                 calibrationError = nil
 
                 // A run that dropped points still fits a map, just from less data than
-                // the user thinks they gave it. Saying so is the difference between "the
-                // calibration is bad" and knowing which run to repeat.
-                let abandoned = capture.abandonedPoints.count
-                if abandoned > 0 {
-                    calibrationError = "\(abandoned) of \(capture.totalPoints) points could not be read cleanly and were left out. Gaze may be less accurate — recalibrate if it feels off."
-                }
+                // the user thinks they gave it. The result screen says so, because that
+                // is the difference between "the calibration is bad" and knowing which
+                // run to repeat.
+                calibrationResult = CalibrationResult(
+                    errorPixels: map.validationErrorPixels,
+                    usedPoints: map.pointCount,
+                    totalPoints: capture.totalPoints,
+                    abandonedPoints: capture.abandonedPoints.count,
+                    isQuick: isQuick
+                )
             } catch {
                 calibrationError = error.localizedDescription
             }
 
-            isCalibrating = false
             self.capture = nil
-            overlays.closeCalibrationWindow()
+            calibrationStage = .finished
             refreshPermissions()
         }
     }
 
+    /// Abandons a run in progress, or closes the result screen.
     public func cancelCalibration() {
-        finishCalibration()
+        closeCalibration()
     }
 
-    private func finishCalibration() {
-        isCalibrating = false
+    /// Dismisses the calibration surface and returns the engine to normal use.
+    public func closeCalibration() {
+        calibrationStage = .idle
         capture = nil
         calibrationProgress = nil
+        pendingPattern = nil
         overlays.closeCalibrationWindow()
         Task { await coordinator.setFeatureObserver(nil) }
+    }
+
+    /// Runs another calibration immediately, using the same pattern.
+    public func repeatCalibration() {
+        let quick = pendingPattern?.name == CalibrationPattern.quick.name
+        closeCalibration()
+        startCalibration(quick: quick)
     }
 
     public func resetCalibration() {

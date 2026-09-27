@@ -66,6 +66,8 @@ public final class CalibrationCapture {
 
     /// Time after a target appears before collection begins. Long enough for the saccade
     /// and its correction to settle.
+    public static let defaultSettleDuration: TimeInterval = 0.45
+
     private let settleDuration: TimeInterval
 
     /// Minimum acceptable frames for a point to produce a sample.
@@ -95,7 +97,7 @@ public final class CalibrationCapture {
 
     public init(
         pattern: CalibrationPattern,
-        settleDuration: TimeInterval = 0.45,
+        settleDuration: TimeInterval = CalibrationCapture.defaultSettleDuration,
         minimumFrames: Int = 10,
         stabilityTolerance: Double = 0.055,
         maximumRetries: Int = 1
@@ -109,6 +111,17 @@ public final class CalibrationCapture {
     }
 
     public var isFinished: Bool { phase == .finished }
+
+    /// How long a full pass over a pattern takes, for telling the user what they are
+    /// committing to before they start.
+    ///
+    /// Derived from the state machine's own timings rather than written down separately,
+    /// so the number shown cannot drift away from the run it describes. Retries are not
+    /// included: they are the exception, and quoting a worst case would make a routine
+    /// calibration sound like a chore.
+    public static func estimatedDuration(for pattern: CalibrationPattern) -> TimeInterval {
+        Double(pattern.points.count) * (defaultSettleDuration + pattern.holdDuration)
+    }
 
     public var currentPoint: CalibrationPattern.Point? {
         guard position < order.count else { return nil }
