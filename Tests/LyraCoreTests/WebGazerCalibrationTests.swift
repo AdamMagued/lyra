@@ -352,14 +352,14 @@ final class WebGazerCalibrationTests: XCTestCase {
         XCTAssertEqual(pattern.points.count, 5)
 
         // 5 macro points: Top Left, Top Right, Left Edge (Stage Manager), Bottom (Dock), Middle
-        XCTAssertEqual(pattern.points[0].x, 0.04, accuracy: 1e-3)
-        XCTAssertEqual(pattern.points[0].y, 0.03, accuracy: 1e-3)
-        XCTAssertEqual(pattern.points[1].x, 0.96, accuracy: 1e-3)
-        XCTAssertEqual(pattern.points[1].y, 0.03, accuracy: 1e-3)
-        XCTAssertEqual(pattern.points[2].x, 0.04, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[0].x, 0.20, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[0].y, 0.08, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[1].x, 0.80, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[1].y, 0.08, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[2].x, 0.08, accuracy: 1e-3)
         XCTAssertEqual(pattern.points[2].y, 0.50, accuracy: 1e-3)
         XCTAssertEqual(pattern.points[3].x, 0.50, accuracy: 1e-3)
-        XCTAssertEqual(pattern.points[3].y, 0.97, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[3].y, 0.88, accuracy: 1e-3)
         XCTAssertEqual(pattern.points[4].x, 0.50, accuracy: 1e-3)
         XCTAssertEqual(pattern.points[4].y, 0.50, accuracy: 1e-3)
 

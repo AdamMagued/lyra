@@ -95,13 +95,13 @@ public struct CalibrationPattern: Sendable {
     /// 5 macro targets matching macOS key zones: Top Left, Top Right, Left Edge (Stage Manager), Bottom (Dock), and Middle.
     public static let macro5 = CalibrationPattern(
         points: [
-            Point(id: 0, x: 0.04, y: 0.03),  // Top Left (Apple & Menu Bar)
-            Point(id: 1, x: 0.96, y: 0.03),  // Top Right (Control Center & Status)
-            Point(id: 2, x: 0.04, y: 0.50),  // Left Edge (Stage Manager)
-            Point(id: 3, x: 0.50, y: 0.97),  // Bottom (Dock)
+            Point(id: 0, x: 0.20, y: 0.08),  // Top Left (Apple & Menu Bar)
+            Point(id: 1, x: 0.80, y: 0.08),  // Top Right (Control Center & Status)
+            Point(id: 2, x: 0.08, y: 0.50),  // Left Edge (Stage Manager)
+            Point(id: 3, x: 0.50, y: 0.88),  // Bottom (Dock)
             Point(id: 4, x: 0.50, y: 0.50)   // Middle (Active Application)
         ],
-        name: "5-Zone Macro (Top Corners • Stage Manager • Dock • Middle)",
+        name: "5-Zone Macro (Top Left • Top Right • Stage Manager • Dock • Middle)",
         holdDuration: 0
     )
 

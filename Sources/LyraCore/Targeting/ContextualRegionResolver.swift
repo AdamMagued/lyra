@@ -34,16 +34,14 @@ public struct ContextualRegionResolver: Sendable {
         let height = screenSize.height
 
         // Macro boundary thresholds
-        let topBarThresholdY = max(height * 0.16, 75.0)
-        let dockThresholdY = height - max(height * 0.16, 95.0)
-        let stageManagerThresholdX = max(width * 0.19, 180.0)
+        // Top bar threshold: generous 22% of screen or at least 140pt so glance upwards effortlessly activates the bar
+        let topBarThresholdY = max(height * 0.22, 140.0)
+        // Dock threshold: generous bottom 28% of screen or at least 220pt so glance downwards effortlessly activates the dock
+        let dockThresholdY = height - max(height * 0.28, 220.0)
+        // Stage manager threshold: left 18% of screen
+        let stageManagerThresholdX = max(width * 0.18, 170.0)
 
-        // 1. Stage Manager: Left edge between menu bar and dock
-        if gazePoint.x <= stageManagerThresholdX && gazePoint.y > 40.0 && gazePoint.y < (height - 65.0) {
-            return resolveStageManagerThumbnail(gazePoint: gazePoint, screenSize: screenSize, candidates: candidates)
-        }
-
-        // 2. Top Menu Bar (Top Left & Top Right)
+        // 1. Top Menu Bar (Top Left & Top Right) - Checked first so gazing upward is never intercepted
         if gazePoint.y <= topBarThresholdY {
             let splitX = width * 0.50
             if gazePoint.x >= splitX {
@@ -53,13 +51,18 @@ public struct ContextualRegionResolver: Sendable {
             }
         }
 
-        // 3. Whole Dock (Bottom Area)
+        // 2. Whole Dock (Bottom Area) - Checked before Stage Manager so bottom-left glance activates Dock
         if gazePoint.y >= dockThresholdY {
             return resolveWholeDock(screenSize: screenSize)
         }
 
-        // 4. Main Workspace (Active Application Window)
-        return resolveActiveAppWindow(screenSize: screenSize, candidates: candidates)
+        // 3. Stage Manager: Left edge between menu bar and dock
+        if gazePoint.x <= stageManagerThresholdX {
+            return resolveStageManagerThumbnail(gazePoint: gazePoint, screenSize: screenSize, candidates: candidates)
+        }
+
+        // 4. Main Workspace: Selects between the open application windows on the screen
+        return resolveActiveAppWindow(gazePoint: gazePoint, screenSize: screenSize, candidates: candidates)
     }
 
     // MARK: - Macro State Creators
@@ -172,38 +175,49 @@ public struct ContextualRegionResolver: Sendable {
         )
     }
 
-    /// Highlights the active application window in the main workspace.
+    /// Highlights the open application window under gaze in the main workspace.
     public func resolveActiveAppWindow(
+        gazePoint: LyraPoint = LyraPoint(x: 0, y: 0),
         screenSize: LyraSize,
         candidates: [TargetCandidate] = []
     ) -> ContextualHighlight {
-        // If an active window candidate is available from accessibility, use its frame
-        if let windowCandidate = candidates.first(where: {
-            ($0.role == "AXWindow" || $0.role == "window") &&
-            $0.frame.width > (screenSize.width * 0.35) &&
-            $0.frame.height > (screenSize.height * 0.35)
-        }) {
+        // Collect all open window candidates
+        let windowCandidates = candidates.filter {
+            ($0.role == "AXWindow" || $0.role == "window" || $0.role == "ActiveWindow") &&
+            $0.frame.width >= 160 &&
+            $0.frame.height >= 120
+        }
+
+        // 1. If gaze is directly inside one of the open windows, highlight that exact window!
+        // (CGWindowList returns windows in front-to-back z-order, so the topmost window wins if overlapping)
+        if let windowUnderGaze = windowCandidates.first(where: { $0.frame.contains(gazePoint) }) {
             return ContextualHighlight(
                 kind: .activeAppWindow,
-                frame: windowCandidate.frame,
-                title: windowCandidate.displayName,
-                subtitle: "Active Window",
-                candidate: windowCandidate
+                frame: windowUnderGaze.frame,
+                title: windowUnderGaze.displayName,
+                subtitle: "Open Window",
+                candidate: windowUnderGaze
             )
         }
 
-        // Default workspace window frame (centered between Stage Manager and right margin)
-        let leftMargin = max(screenSize.width * 0.14, 150.0)
-        let topMargin = 38.0
-        let bottomMargin = 96.0
-        let rightMargin = 20.0
+        // 2. If gaze is in the workspace near open windows, select the nearest open window
+        if let closestWindow = windowCandidates.min(by: { $0.frame.distance(to: gazePoint) < $1.frame.distance(to: gazePoint) }) {
+            return ContextualHighlight(
+                kind: .activeAppWindow,
+                frame: closestWindow.frame,
+                title: closestWindow.displayName,
+                subtitle: "Open Window",
+                candidate: closestWindow
+            )
+        }
 
-        let frame = LyraRect(
-            x: leftMargin,
-            y: topMargin,
-            width: screenSize.width - leftMargin - rightMargin,
-            height: screenSize.height - topMargin - bottomMargin
-        )
+        // 3. Fallback if no window candidates: pleasantly proportioned centered workspace window (not too big!)
+        let fallbackWidth = min(screenSize.width * 0.60, 880.0)
+        let fallbackHeight = min(screenSize.height * 0.55, 540.0)
+        let fallbackX = (screenSize.width - fallbackWidth) / 2.0
+        let fallbackY = 44.0 + (screenSize.height - 44.0 - 90.0 - fallbackHeight) / 2.0
+
+        let frame = LyraRect(x: fallbackX, y: fallbackY, width: fallbackWidth, height: fallbackHeight)
 
         return ContextualHighlight(
             kind: .activeAppWindow,
