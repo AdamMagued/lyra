@@ -92,6 +92,19 @@ public struct CalibrationPattern: Sendable {
 
     public static let ninePoint = webGazer9
 
+    /// 5 macro targets matching macOS key zones: Top Left, Top Right, Left Edge (Stage Manager), Bottom (Dock), and Middle.
+    public static let macro5 = CalibrationPattern(
+        points: [
+            Point(id: 0, x: 0.04, y: 0.03),  // Top Left (Apple & Menu Bar)
+            Point(id: 1, x: 0.96, y: 0.03),  // Top Right (Control Center & Status)
+            Point(id: 2, x: 0.04, y: 0.50),  // Left Edge (Stage Manager)
+            Point(id: 3, x: 0.50, y: 0.97),  // Bottom (Dock)
+            Point(id: 4, x: 0.50, y: 0.50)   // Middle (Active Application)
+        ],
+        name: "5-Zone Macro (Top Corners • Stage Manager • Dock • Middle)",
+        holdDuration: 0
+    )
+
     /// 16 points in a 4x4 grid, for click-driven calibration.
     ///
     /// Coverage matters more than replication here. The fit has ~20 terms, and what
