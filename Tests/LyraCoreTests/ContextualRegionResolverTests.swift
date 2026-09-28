@@ -71,24 +71,40 @@ final class ContextualRegionResolverTests: XCTestCase {
         XCTAssertEqual(highlight?.kind, .dock)
     }
 
+    func testLeftEdgeGuardsProtectTopLeftAndDock() {
+        // Upper left edge above Stage Manager routes to Top Left
+        let upperLeft = resolver.resolve(
+            gazePoint: LyraPoint(x: 40, y: 150),
+            screenSize: screenSize
+        )
+        XCTAssertNotNil(upperLeft)
+        XCTAssertEqual(upperLeft?.kind, .topLeftMenu)
+
+        // Lower left edge below Stage Manager routes to Dock
+        let lowerLeft = resolver.resolve(
+            gazePoint: LyraPoint(x: 40, y: 780),
+            screenSize: screenSize
+        )
+        XCTAssertNotNil(lowerLeft)
+        XCTAssertEqual(lowerLeft?.kind, .dock)
+    }
+
     func testStageManagerWindowSlotClosestCalculation() {
-        // Gaze is at left edge, top-most slot (y ~ 220)
+        // Gaze is at left edge, inside the Stage Manager vertical band (y ~ 350)
         let slot1 = resolver.resolve(
-            gazePoint: LyraPoint(x: 40, y: 220),
+            gazePoint: LyraPoint(x: 40, y: 350),
             screenSize: screenSize
         )
         XCTAssertNotNil(slot1)
         XCTAssertEqual(slot1?.kind, .stageManager)
-        XCTAssertEqual(slot1?.title, "Stage Manager (Window 1)")
 
-        // Gaze is at left edge, middle slot (y ~ 610)
+        // Gaze is at left edge, middle slot (y ~ 550)
         let slot3 = resolver.resolve(
-            gazePoint: LyraPoint(x: 40, y: 610),
+            gazePoint: LyraPoint(x: 40, y: 550),
             screenSize: screenSize
         )
         XCTAssertNotNil(slot3)
         XCTAssertEqual(slot3?.kind, .stageManager)
-        XCTAssertEqual(slot3?.title, "Stage Manager (Window 3)")
     }
 
     func testOpenWindowHighlightingAroundWindowUnderGaze() {

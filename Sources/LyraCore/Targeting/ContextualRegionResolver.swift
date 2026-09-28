@@ -34,14 +34,17 @@ public struct ContextualRegionResolver: Sendable {
         let height = screenSize.height
 
         // Macro boundary thresholds
-        // Top bar threshold: generous 22% of screen or at least 140pt so glance upwards effortlessly activates the bar
-        let topBarThresholdY = max(height * 0.22, 140.0)
-        // Dock threshold: generous bottom 28% of screen or at least 220pt so glance downwards effortlessly activates the dock
-        let dockThresholdY = height - max(height * 0.28, 220.0)
-        // Stage manager threshold: left 18% of screen
+        // Top bar threshold: generous 28% of screen height (~275pt on 982) so upward glance effortlessly captures top bar
+        let topBarThresholdY = max(height * 0.28, 220.0)
+        // Dock threshold: generous bottom 34% of screen height (~66% of height) so downward glance effortlessly captures the Dock
+        let dockThresholdY = height - max(height * 0.34, 280.0)
+        // Stage Manager left edge threshold
         let stageManagerThresholdX = max(width * 0.18, 170.0)
+        // Stage Manager vertical bounds: Stage Manager thumbnails strictly live in the middle band
+        let stageManagerMinY = max(height * 0.25, 200.0)
+        let stageManagerMaxY = height - max(height * 0.32, 260.0)
 
-        // 1. Top Menu Bar (Top Left & Top Right) - Checked first so gazing upward is never intercepted
+        // 1. Top Menu Bar (Top Left & Top Right) - Evaluated first so upward glance is never intercepted
         if gazePoint.y <= topBarThresholdY {
             let splitX = width * 0.50
             if gazePoint.x >= splitX {
@@ -51,14 +54,24 @@ public struct ContextualRegionResolver: Sendable {
             }
         }
 
-        // 2. Whole Dock (Bottom Area) - Checked before Stage Manager so bottom-left glance activates Dock
+        // 2. Whole Dock (Bottom Area) - Evaluated second so downward glance effortlessly captures Dock
         if gazePoint.y >= dockThresholdY {
             return resolveWholeDock(screenSize: screenSize)
         }
 
-        // 3. Stage Manager: Left edge between menu bar and dock
-        if gazePoint.x <= stageManagerThresholdX {
+        // 3. Stage Manager: Left edge STRICTLY within its physical vertical thumbnail band
+        if gazePoint.x <= stageManagerThresholdX && gazePoint.y >= stageManagerMinY && gazePoint.y <= stageManagerMaxY {
             return resolveStageManagerThumbnail(gazePoint: gazePoint, screenSize: screenSize, candidates: candidates)
+        }
+
+        // 3b. Left Edge Top Guard: If on the left edge above Stage Manager, route to Top Left
+        if gazePoint.x <= stageManagerThresholdX && gazePoint.y < stageManagerMinY {
+            return resolveWholeTopLeft(screenSize: screenSize)
+        }
+
+        // 3c. Left Edge Bottom Guard: If on the left edge below Stage Manager, route to Dock
+        if gazePoint.x <= stageManagerThresholdX && gazePoint.y > stageManagerMaxY {
+            return resolveWholeDock(screenSize: screenSize)
         }
 
         // 4. Main Workspace: Selects between the open application windows on the screen
