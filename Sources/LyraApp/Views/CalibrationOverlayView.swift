@@ -112,79 +112,41 @@ struct CalibrationOverlayView: View {
                 .position(x: pt.x * size.width, y: pt.y * size.height)
             }
 
-            // Top HUD
+            // Top-Right Exit Button ('X') with 'Press escape to exit' hint
             VStack {
-                webGazerHUD(progress)
+                HStack(spacing: 12) {
+                    Spacer()
+                    Text("Press escape to exit")
+                        .font(.system(size: 11, design: .default))
+                        .foregroundStyle(Color.white.opacity(0.45))
+
+                    exitButton
+                }
                 Spacer()
             }
-            .padding(.top, 54)
-            .padding(.horizontal, 32)
+            .padding(.top, 24)
+            .padding(.trailing, 28)
         }
     }
 
-    private func webGazerHUD(_ progress: WebGazerCalibration.Progress) -> some View {
-        HStack(spacing: 20) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+    private var exitButton: some View {
+        Button(action: { viewModel.cancelCalibration() }) {
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.75))
+                .frame(width: 32, height: 32)
+                .background(
                     Circle()
-                        .fill(Color(red: 0.22, green: 0.78, blue: 0.48))
-                        .frame(width: 7, height: 7)
-                    Text("WebGazer 9-Point Calibration")
-                        .font(.system(size: 15, weight: .semibold, design: .default))
-                        .foregroundStyle(Color.white)
-                }
-
-                Text("Look directly at each target and click it 5 times")
-                    .font(.system(size: 12, design: .default))
-                    .foregroundStyle(Color(red: 0.65, green: 0.65, blue: 0.68))
-            }
-
-            Spacer(minLength: 24)
-
-            // Minimalist Progress Track
-            VStack(alignment: .trailing, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text("\(progress.totalClicks)")
-                        .font(.system(size: 13, weight: .semibold, design: .default).monospacedDigit())
-                        .foregroundStyle(Color.white)
-                    Text("/")
-                        .font(.system(size: 12, design: .default))
-                        .foregroundStyle(Color(red: 0.5, green: 0.5, blue: 0.52))
-                    Text("\(progress.requiredClicks) clicks")
-                        .font(.system(size: 12, design: .default).monospacedDigit())
-                        .foregroundStyle(Color(red: 0.65, green: 0.65, blue: 0.68))
-                }
-
-                GeometryReader { barGeo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.white.opacity(0.08))
-                        Capsule()
-                            .fill(Color.white.opacity(0.85))
-                            .frame(width: barGeo.size.width * CGFloat(progress.overallProgressFraction))
-                            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: progress.totalClicks)
-                    }
-                }
-                .frame(width: 140, height: 5)
-            }
-
-            Button("Cancel") {
-                viewModel.cancelCalibration()
-            }
-            .buttonStyle(ZincPillButtonStyle())
-            .keyboardShortcut(.escape, modifiers: [])
+                        .fill(Color.white.opacity(0.08))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                )
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(red: 0.11, green: 0.11, blue: 0.12).opacity(0.92))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-        )
-        .shadow(color: Color.black.opacity(0.4), radius: 18, y: 6)
+        .buttonStyle(.plain)
+        .keyboardShortcut(.escape, modifiers: [])
+        .help("Exit (ESC)")
     }
 
     // MARK: - WebGazer Precision Verification View
@@ -262,82 +224,57 @@ struct CalibrationOverlayView: View {
     // MARK: - Intro Card
 
     private var introCard: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Calibration")
-                    .font(.system(size: 24, weight: .semibold, design: .default))
-                    .foregroundStyle(.white)
-
-                Text("Maps your eye and facial landmarks to precise screen coordinates using Ridge Regression (L2 regularization).")
-                    .font(.system(size: 13, design: .default))
-                    .foregroundStyle(Color(red: 0.65, green: 0.65, blue: 0.68))
-                    .lineSpacing(2)
+        ZStack {
+            // Top-right exit button ('X')
+            VStack {
+                HStack {
+                    Spacer()
+                    exitButton
+                }
+                Spacer()
             }
+            .padding(.top, 24)
+            .padding(.trailing, 28)
 
-            VStack(alignment: .leading, spacing: 12) {
-                minimalBullet(
-                    "scope",
-                    "9 simultaneous targets in a 3×3 grid. Look at each target and click it 5 times (45 samples)."
-                )
-                minimalBullet(
-                    "function",
-                    "Fits continuous Ridge Regression polynomials for X and Y screen axes with L2 regularization."
-                )
-                minimalBullet(
-                    "stopwatch",
-                    "A 3.5-second center verification phase immediately validates live tracking accuracy."
-                )
-            }
-            .padding(.vertical, 4)
+            // Centered minimalist prompt
+            VStack(spacing: 24) {
+                VStack(spacing: 10) {
+                    Text("Look and click on each point five times")
+                        .font(.system(size: 22, weight: .semibold, design: .default))
+                        .foregroundStyle(.white)
 
-            HStack(spacing: 12) {
-                Button("Begin Calibration") {
+                    Text("Press escape to exit")
+                        .font(.system(size: 13, design: .default))
+                        .foregroundStyle(Color(red: 0.60, green: 0.60, blue: 0.62))
+                }
+
+                Button("Start Calibration") {
                     viewModel.beginCalibration()
                 }
                 .buttonStyle(ZincProminentButtonStyle())
                 .keyboardShortcut(.defaultAction)
 
-                Button("Cancel") {
-                    viewModel.cancelCalibration()
+                if let error = viewModel.calibrationError {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 12))
+                        Text(error)
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(Color(red: 0.95, green: 0.65, blue: 0.25))
                 }
-                .buttonStyle(ZincSecondaryButtonStyle())
-                .keyboardShortcut(.escape, modifiers: [])
             }
-            .padding(.top, 4)
-
-            if let error = viewModel.calibrationError {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 12))
-                    Text(error)
-                        .font(.system(size: 12))
-                }
-                .foregroundStyle(Color(red: 0.95, green: 0.65, blue: 0.25))
-            }
-        }
-        .padding(32)
-        .frame(maxWidth: 560, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-        )
-        .shadow(color: Color.black.opacity(0.5), radius: 30, y: 12)
-    }
-
-    private func minimalBullet(_ symbol: String, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(red: 0.75, green: 0.75, blue: 0.78))
-                .frame(width: 20, alignment: .center)
-            Text(text)
-                .font(.system(size: 13, design: .default))
-                .foregroundStyle(Color(red: 0.88, green: 0.88, blue: 0.90))
-                .fixedSize(horizontal: false, vertical: true)
+            .padding(40)
+            .frame(maxWidth: 480)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
+            .shadow(color: Color.black.opacity(0.4), radius: 24, y: 8)
         }
     }
 

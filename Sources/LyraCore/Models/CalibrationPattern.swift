@@ -73,18 +73,18 @@ public struct CalibrationPattern: Sendable {
     /// (0.10, 0.10), (0.50, 0.10), (0.90, 0.10),
     /// (0.10, 0.50), (0.50, 0.50), (0.90, 0.50),
     /// (0.10, 0.90), (0.50, 0.90), (0.90, 0.90).
-    /// WebGazer 9-point multi-click pattern: 3x3 grid safe from macOS notch, menu bar, and dock.
+    /// WebGazer 9-point multi-click pattern: 3x3 grid (0.10, 0.50, 0.90) across screen.
     public static let webGazer9 = CalibrationPattern(
         points: [
-            Point(id: 0, x: 0.12, y: 0.16),
-            Point(id: 1, x: 0.50, y: 0.16),
-            Point(id: 2, x: 0.88, y: 0.16),
-            Point(id: 3, x: 0.12, y: 0.50),
+            Point(id: 0, x: 0.10, y: 0.10),
+            Point(id: 1, x: 0.50, y: 0.10),
+            Point(id: 2, x: 0.90, y: 0.10),
+            Point(id: 3, x: 0.10, y: 0.50),
             Point(id: 4, x: 0.50, y: 0.50),
-            Point(id: 5, x: 0.88, y: 0.50),
-            Point(id: 6, x: 0.12, y: 0.84),
-            Point(id: 7, x: 0.50, y: 0.84),
-            Point(id: 8, x: 0.88, y: 0.84)
+            Point(id: 5, x: 0.90, y: 0.50),
+            Point(id: 6, x: 0.10, y: 0.90),
+            Point(id: 7, x: 0.50, y: 0.90),
+            Point(id: 8, x: 0.90, y: 0.90)
         ],
         name: "WebGazer 9-Point (3×3)",
         holdDuration: 0
