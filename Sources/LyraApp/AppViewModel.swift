@@ -34,7 +34,7 @@ public final class AppViewModel: ObservableObject {
         public var id: String { rawValue }
         public var title: String {
             switch self {
-            case .macroZones5: return "5-Zone Macro (Corners • Stage Manager • Dock • Middle)"
+            case .macroZones5: return "Macro Zones (Menu Bar • Stage Manager • Dock • Windows)"
             case .webGazer9: return "WebGazer 9-Point (3×3 Grid • 45 Clicks)"
             case .adaptive: return "3-Stage Smart (Corners → Ball → Polish)"
             case .click: return "Click Dots (16 dots, 64 clicks)"
@@ -105,7 +105,7 @@ public final class AppViewModel: ObservableObject {
     /// What the intro screen is offering.
     public var calibrationPointCount: Int {
         switch calibrationMode {
-        case .macroZones5: return 5
+        case .macroZones5: return CalibrationPattern.macro5.points.count
         case .webGazer9: return 9
         case .adaptive: return 5
         case .click: return CalibrationPattern.click.points.count
@@ -115,7 +115,7 @@ public final class AppViewModel: ObservableObject {
     /// How many clicks the offered run asks for in total.
     public var calibrationClickCount: Int {
         switch calibrationMode {
-        case .macroZones5: return 25
+        case .macroZones5: return calibrationPointCount * 5
         case .webGazer9: return 45
         case .adaptive: return 5
         case .click: return calibrationPointCount * Self.clicksPerPoint

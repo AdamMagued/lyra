@@ -170,4 +170,29 @@ final class ContextualRegionResolverTests: XCTestCase {
         XCTAssertLessThanOrEqual(highlight?.frame.width ?? 0, screenSize.width * 0.65)
         XCTAssertLessThanOrEqual(highlight?.frame.height ?? 0, screenSize.height * 0.60)
     }
+
+    func testBottomRightGazeCapturesDockEffortlessly() {
+        // Gaze is in bottom-right quadrant (e.g. towards trash / downloads)
+        let highlight = resolver.resolve(
+            gazePoint: LyraPoint(x: 1200, y: 700),
+            screenSize: screenSize
+        )
+
+        XCTAssertNotNil(highlight)
+        XCTAssertEqual(highlight?.kind, .dock)
+        XCTAssertEqual(highlight?.title, "Dock")
+    }
+
+    func testTopLeftIshGazeCapturesTopLeftEffortlessly() {
+        // Gaze is top-left ish without needing extreme bezel glance
+        let highlight = resolver.resolve(
+            gazePoint: LyraPoint(x: 450, y: 240),
+            screenSize: screenSize
+        )
+
+        XCTAssertNotNil(highlight)
+        XCTAssertEqual(highlight?.kind, .topLeftMenu)
+        XCTAssertEqual(highlight?.title, "Apple & App Menu")
+    }
 }
+
