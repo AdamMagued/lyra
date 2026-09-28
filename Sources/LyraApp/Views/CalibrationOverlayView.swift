@@ -124,8 +124,8 @@ struct CalibrationOverlayView: View {
                 }
                 Spacer()
             }
-            .padding(.top, 24)
-            .padding(.trailing, 28)
+            .padding(.top, 16)
+            .padding(.trailing, 72)
         }
     }
 
