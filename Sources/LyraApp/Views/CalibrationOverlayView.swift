@@ -19,8 +19,8 @@ struct CalibrationOverlayView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Deep zinc translucent background
-                Color(red: 0.05, green: 0.05, blue: 0.06).opacity(0.85)
+                // Completely opaque solid matte black background for pure focus
+                Color(red: 0.05, green: 0.05, blue: 0.06)
                     .ignoresSafeArea()
 
                 switch viewModel.calibrationStage {
@@ -117,7 +117,7 @@ struct CalibrationOverlayView: View {
                 webGazerHUD(progress)
                 Spacer()
             }
-            .padding(.top, 36)
+            .padding(.top, 54)
             .padding(.horizontal, 32)
         }
     }
@@ -274,38 +274,19 @@ struct CalibrationOverlayView: View {
                     .lineSpacing(2)
             }
 
-            Picker("Calibration Engine", selection: $viewModel.calibrationMode) {
-                Text("WebGazer 9-Point (Recommended)").tag(AppViewModel.CalibrationMode.webGazer9)
-                Text("3-Stage Smart").tag(AppViewModel.CalibrationMode.adaptive)
-                Text("16-Point Click").tag(AppViewModel.CalibrationMode.click)
-            }
-            .pickerStyle(.segmented)
-
             VStack(alignment: .leading, spacing: 12) {
-                if viewModel.calibrationMode == .webGazer9 {
-                    minimalBullet(
-                        "scope",
-                        "9 simultaneous targets in a 3×3 grid. Look at each target and click it 5 times (45 samples)."
-                    )
-                    minimalBullet(
-                        "function",
-                        "Fits continuous Ridge Regression polynomials for X and Y screen axes with L2 shrinkage."
-                    )
-                    minimalBullet(
-                        "stopwatch",
-                        "A 3.5-second center verification phase immediately validates live tracking accuracy."
-                    )
-                    minimalBullet(
-                        "arrow.triangle.2.circlepath",
-                        "Passive continuous learning updates calibration samples during normal computer clicks."
-                    )
-                } else if viewModel.calibrationMode == .adaptive {
-                    minimalBullet("hand.tap", "Stage 1 (Corners): Look at 5 anchor points and click each.")
-                    minimalBullet("eye", "Stage 2 (Smooth Pursuit): Follow a gliding ball across screen rows.")
-                    minimalBullet("sparkles", "Stage 3 (Polish): Fine-tunes any regions with residual error.")
-                } else {
-                    minimalBullet("hand.tap", "Click each dot 4 times across 16 sequential screen points.")
-                }
+                minimalBullet(
+                    "scope",
+                    "9 simultaneous targets in a 3×3 grid. Look at each target and click it 5 times (45 samples)."
+                )
+                minimalBullet(
+                    "function",
+                    "Fits continuous Ridge Regression polynomials for X and Y screen axes with L2 regularization."
+                )
+                minimalBullet(
+                    "stopwatch",
+                    "A 3.5-second center verification phase immediately validates live tracking accuracy."
+                )
             }
             .padding(.vertical, 4)
 
@@ -427,7 +408,7 @@ struct CalibrationOverlayView: View {
                     }
                 }
 
-                Text("\(result.usedPoints) of \(result.totalPoints) samples fitted into personalized eye model. Continuous click training is active to maintain precision.")
+                Text("\(result.usedPoints) of \(result.totalPoints) samples fitted into personalized eye model with regularized polynomial mapping.")
                     .font(.system(size: 13, design: .default))
                     .foregroundStyle(Color(red: 0.75, green: 0.75, blue: 0.78))
                     .lineSpacing(2)

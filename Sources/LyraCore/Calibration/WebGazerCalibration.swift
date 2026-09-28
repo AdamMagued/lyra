@@ -89,23 +89,16 @@ public final class WebGazerCalibration: @unchecked Sendable {
         self.minimumFrames = max(minimumFrames, 2)
         self.clickTolerancePoints = clickTolerancePoints
 
-        // 3×3 grid: 0.10, 0.50, 0.90
-        let coords: [Double] = [0.10, 0.50, 0.90]
-        var initialPoints: [PointState] = []
-        var id = 0
-        for y in coords {
-            for x in coords {
-                initialPoints.append(PointState(
-                    id: id,
-                    x: x,
-                    y: y,
-                    clicks: 0,
-                    clicksRequired: clicksPerPoint
-                ))
-                id += 1
-            }
+        // 3×3 grid: uses CalibrationPattern.webGazer9 for safe screen positioning
+        self.points = CalibrationPattern.webGazer9.points.map {
+            PointState(
+                id: $0.id,
+                x: $0.x,
+                y: $0.y,
+                clicks: 0,
+                clicksRequired: clicksPerPoint
+            )
         }
-        self.points = initialPoints
     }
 
     // MARK: - State

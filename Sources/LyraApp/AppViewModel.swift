@@ -137,8 +137,8 @@ public final class AppViewModel: ObservableObject {
         didSet { Task { await coordinator.setAutoLensEnabled(autoLensEnabled) } }
     }
 
-    /// Steering mode: pure nose tracking, hybrid (glance + nose fine tune), or eye gaze only.
-    @Published public var steeringMode: NoseFineTuneController.Mode = .noseOnly {
+    /// Steering mode: pure eye gaze tracking (default and standard).
+    @Published public var steeringMode: NoseFineTuneController.Mode = .gazeOnly {
         didSet {
             UserDefaults.standard.set(steeringMode.rawValue, forKey: "com.lyra.steeringMode")
             Task { await coordinator.setSteeringMode(steeringMode) }
@@ -153,8 +153,8 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
-    /// Whether normal computer clicks continuously update the calibration model.
-    @Published public var continuousTrainingEnabled: Bool = true {
+    /// Continuous training from background clicks (disabled per design).
+    @Published public var continuousTrainingEnabled: Bool = false {
         didSet {
             UserDefaults.standard.set(continuousTrainingEnabled, forKey: "com.lyra.continuousTrainingEnabled")
             Task { await coordinator.setContinuousTrainingEnabled(continuousTrainingEnabled) }
@@ -285,57 +285,28 @@ public final class AppViewModel: ObservableObject {
             Task { @MainActor [weak self] in self?.previewImage = image }
         }
 
-        if let storedModeStr = UserDefaults.standard.string(forKey: "com.lyra.steeringMode"),
-           let storedMode = NoseFineTuneController.Mode(rawValue: storedModeStr) {
-            self.steeringMode = storedMode
-        } else {
-            self.steeringMode = .noseOnly
-        }
+        self.steeringMode = .gazeOnly
         self.syncSystemCursor = UserDefaults.standard.bool(forKey: "com.lyra.syncSystemCursor")
-        self.invertNoseX = UserDefaults.standard.bool(forKey: "com.lyra.invertNoseX")
-        self.invertNoseY = UserDefaults.standard.bool(forKey: "com.lyra.invertNoseY")
-        let storedSens = UserDefaults.standard.double(forKey: "com.lyra.noseSensitivity")
-        if storedSens > 0.1 {
-            self.noseSensitivity = storedSens
-        }
-        if UserDefaults.standard.object(forKey: "com.lyra.continuousTrainingEnabled") != nil {
-            self.continuousTrainingEnabled = UserDefaults.standard.bool(forKey: "com.lyra.continuousTrainingEnabled")
-        }
-        Task { [mode = self.steeringMode, enabled = self.noseFineTuneEnabled, sens = self.noseSensitivity, sync = self.syncSystemCursor, invX = self.invertNoseX, invY = self.invertNoseY, cont = self.continuousTrainingEnabled] in
-            await coordinator.setSteeringMode(mode)
-            await coordinator.setNoseFineTune(enabled: enabled, sensitivity: sens, invertX: invX, invertY: invY)
+        self.invertNoseX = false
+        self.invertNoseY = false
+        self.continuousTrainingEnabled = false
+        Task { [sync = self.syncSystemCursor] in
+            await coordinator.setSteeringMode(.gazeOnly)
+            await coordinator.setNoseFineTune(enabled: false, sensitivity: 2.0, invertX: false, invertY: false)
             await coordinator.setSyncSystemCursor(sync)
-            await coordinator.setContinuousTrainingEnabled(cont)
+            await coordinator.setContinuousTrainingEnabled(false)
         }
 
-        setupPassiveClickMonitoring()
+        // Passive click monitoring disabled per product requirements (eye-tracking only)
         Task { await restoreCalibration() }
     }
 
-
-
     private func setupPassiveClickMonitoring() {
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.handlePassiveSystemClick(screenPoint: NSEvent.mouseLocation)
-            }
-        }
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.handlePassiveSystemClick(screenPoint: NSEvent.mouseLocation)
-            }
-            return event
-        }
+        // Disabled: continuous background click monitoring removed to prevent noise.
     }
 
     private func handlePassiveSystemClick(screenPoint: NSPoint) {
-        guard snapshot.isEngineRunning, !isCalibrating, continuousTrainingEnabled,
-              let screen = NSScreen.main else { return }
-        let normX = screenPoint.x / screen.frame.width
-        let normY = (screen.frame.height - screenPoint.y) / screen.frame.height
-        Task {
-            await coordinator.registerPassiveClick(atNormalized: (x: Double(normX), y: Double(normY)))
-        }
+        // No-op
     }
 
     // MARK: - Display changes

@@ -18,7 +18,6 @@ struct MainDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 headerBar
-                modeSelectorBar
                 primaryActionsBar
                 settingsGrid
                 telemetrySection
@@ -28,7 +27,7 @@ struct MainDashboardView: View {
             .padding(24)
         }
         .background(Color(red: 0.07, green: 0.07, blue: 0.08).ignoresSafeArea())
-        .frame(minWidth: 480, idealWidth: 520, minHeight: 640)
+        .frame(minWidth: 480, idealWidth: 520, minHeight: 560)
     }
 
     // MARK: - Header Bar
@@ -52,7 +51,7 @@ struct MainDashboardView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Lyra")
+                        Text("Lyra Eye Control")
                             .font(.system(size: 16, weight: .semibold, design: .default))
                             .foregroundStyle(.white)
                         Text("v0.1")
@@ -74,11 +73,7 @@ struct MainDashboardView: View {
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
 
-                if viewModel.steeringMode == .noseOnly {
-                    Text("Zero-Jitter Head")
-                        .font(.system(size: 12, weight: .medium, design: .default))
-                        .foregroundStyle(.white)
-                } else if viewModel.isCalibrated {
+                if viewModel.isCalibrated {
                     Text(String(format: "±%.0f px", viewModel.calibrationMap.validationErrorPixels))
                         .font(.system(size: 12, weight: .semibold, design: .default).monospacedDigit())
                         .foregroundStyle(.white)
@@ -128,66 +123,36 @@ struct MainDashboardView: View {
         }
     }
 
-    // MARK: - Mode Selector
-
-    private var modeSelectorBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Steering Mode", selection: $viewModel.steeringMode) {
-                Text("Nose Pointer (Zero Jitter)").tag(NoseFineTuneController.Mode.noseOnly)
-                Text("Hybrid (Eye + Nose)").tag(NoseFineTuneController.Mode.hybrid)
-                Text("Eye Only (WebGazer)").tag(NoseFineTuneController.Mode.gazeOnly)
-            }
-            .pickerStyle(.segmented)
-        }
-    }
-
     // MARK: - Action Buttons
 
     private var primaryActionsBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             // Start / Stop Toggle
             Button(action: { viewModel.toggleEngine() }) {
-                HStack(spacing: 7) {
+                HStack(spacing: 8) {
                     Image(systemName: snapshot.isEngineRunning ? "stop.fill" : "play.fill")
                         .font(.system(size: 11, weight: .bold))
-                    Text(snapshot.isEngineRunning ? "Stop Engine" : "Start Engine")
+                    Text(snapshot.isEngineRunning ? "Stop Eye Tracking" : "Start Eye Tracking")
                         .font(.system(size: 13, weight: .semibold, design: .default))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .padding(.vertical, 9)
             }
             .buttonStyle(ZincProminentButtonStyle())
             .disabled(viewModel.isCalibrating)
 
-            // Recenter or Calibrate Button
-            if viewModel.steeringMode == .noseOnly {
-                Button(action: { viewModel.recenterNose() }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "scope")
-                            .font(.system(size: 12))
-                        Text("Recenter (C)")
-                            .font(.system(size: 13, weight: .medium, design: .default))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+            Button(action: { viewModel.startCalibration() }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "scope")
+                        .font(.system(size: 12))
+                    Text(viewModel.isCalibrated ? "Recalibrate (9-Point)" : "Calibrate (9-Point)")
+                        .font(.system(size: 13, weight: .medium, design: .default))
                 }
-                .buttonStyle(ZincSecondaryButtonStyle())
-                .keyboardShortcut("c", modifiers: [])
-                .help("Recenter the pointer to your current neutral head position (or press 'C')")
-            } else {
-                Button(action: { viewModel.startCalibration() }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "scope")
-                            .font(.system(size: 12))
-                        Text(viewModel.isCalibrated ? "Recalibrate" : "Calibrate (9-Point)")
-                            .font(.system(size: 13, weight: .medium, design: .default))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(ZincSecondaryButtonStyle())
-                .disabled(viewModel.isCalibrating)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
             }
+            .buttonStyle(ZincSecondaryButtonStyle())
+            .disabled(viewModel.isCalibrating)
         }
     }
 
@@ -195,92 +160,54 @@ struct MainDashboardView: View {
 
     private var settingsGrid: some View {
         VStack(spacing: 12) {
-            // Card 1: Features & Online Training
-            VStack(spacing: 12) {
-                HStack {
-                    settingToggleRow(
-                        title: "AutoLens Magnify",
-                        subtitle: "Cluster zoom on small controls",
-                        isOn: $viewModel.autoLensEnabled
-                    )
-                    Divider()
-                        .frame(height: 32)
-                        .background(Color.white.opacity(0.06))
-                    settingToggleRow(
-                        title: "Gaze Indicator",
-                        subtitle: "On-screen reticle overlay",
-                        isOn: $viewModel.showGazeOverlay
-                    )
-                }
-
+            HStack {
+                settingToggleRow(
+                    title: "AutoLens Magnify",
+                    subtitle: "Cluster zoom on small controls",
+                    isOn: $viewModel.autoLensEnabled
+                )
                 Divider()
+                    .frame(height: 32)
                     .background(Color.white.opacity(0.06))
-
-                HStack {
-                    settingToggleRow(
-                        title: "Sync System Mouse",
-                        subtitle: "Warp macOS cursor to gaze",
-                        isOn: $viewModel.syncSystemCursor
-                    )
-                    Divider()
-                        .frame(height: 32)
-                        .background(Color.white.opacity(0.06))
-                    settingToggleRow(
-                        title: "Continuous Learning",
-                        subtitle: "Refine model from user clicks",
-                        isOn: $viewModel.continuousTrainingEnabled
-                    )
-                }
+                settingToggleRow(
+                    title: "Gaze Indicator",
+                    subtitle: "On-screen reticle overlay",
+                    isOn: $viewModel.showGazeOverlay
+                )
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-            )
 
-            // Card 2: Sensitivity & Axis Inversion (When Head / Nose enabled)
-            if viewModel.steeringMode != .gazeOnly {
-                HStack(spacing: 20) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Head Sensitivity")
-                                .font(.system(size: 12, weight: .medium, design: .default))
-                                .foregroundStyle(Color(red: 0.88, green: 0.88, blue: 0.90))
-                            Spacer()
-                            Text(String(format: "%.1f×", viewModel.noseSensitivity))
-                                .font(.system(size: 12, weight: .semibold, design: .default).monospacedDigit())
-                                .foregroundStyle(.white)
-                        }
-                        Slider(value: $viewModel.noseSensitivity, in: 0.5...4.5, step: 0.1)
-                            .controlSize(.small)
-                    }
+            Divider()
+                .background(Color.white.opacity(0.06))
 
-                    HStack(spacing: 12) {
-                        Toggle("Invert X", isOn: $viewModel.invertNoseX)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11, design: .default))
-
-                        Toggle("Invert Y", isOn: $viewModel.invertNoseY)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11, design: .default))
-                    }
-                    .foregroundStyle(Color(red: 0.75, green: 0.75, blue: 0.78))
+            HStack {
+                settingToggleRow(
+                    title: "Sync System Mouse",
+                    subtitle: "Warp macOS cursor to gaze",
+                    isOn: $viewModel.syncSystemCursor
+                )
+                Divider()
+                    .frame(height: 32)
+                    .background(Color.white.opacity(0.06))
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.tap")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color(red: 0.60, green: 0.60, blue: 0.62))
+                    Text("Dwell to activate targets")
+                        .font(.system(size: 11, design: .default))
+                        .foregroundStyle(Color(red: 0.60, green: 0.60, blue: 0.62))
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-                )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+        )
     }
 
     private func settingToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
@@ -329,12 +256,10 @@ struct MainDashboardView: View {
                                 .foregroundStyle(.white)
                         }
 
-                        Text(viewModel.steeringMode == .noseOnly
-                            ? "Tracking rigid nose landmarks. Deadband locks resting position for zero-jitter control."
-                            : "WebGazer polynomial mapping from ocular features to screen coordinates.")
+                        Text("WebGazer polynomial mapping from ocular features to screen coordinates.")
                             .font(.system(size: 11, design: .default))
                             .foregroundStyle(Color(red: 0.65, green: 0.65, blue: 0.68))
-                            .lineLimit(3)
+                            .lineLimit(2)
 
                         HStack(spacing: 12) {
                             Text("\(snapshot.targetCount) targets active")
@@ -456,7 +381,7 @@ struct MainDashboardView: View {
 
     private var footerNotes: some View {
         HStack {
-            Text("Shortcuts: C to recenter • ESC to exit • Space to trigger")
+            Text("Shortcuts: ESC to exit • Space to trigger")
                 .font(.system(size: 11, design: .default))
                 .foregroundStyle(Color(red: 0.62, green: 0.62, blue: 0.65))
 

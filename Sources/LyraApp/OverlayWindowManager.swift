@@ -60,12 +60,17 @@ public final class OverlayWindowManager {
         // ordered front, alpha 1.0, and completely invisible. Nothing about the code
         // looked wrong — only the window list showed it, as `1470x956` became `0x0`.
         //
-        // ponytail: setFrame rather than constraints, because the window is always
-        // exactly one screen and never resizes. Revisit if overlays become resizable.
+        // Hide existing app windows (like the dashboard) during calibration so there is zero overlap
+        NSApp.windows.forEach { otherWindow in
+            if otherWindow != calibrationWindow && otherWindow != indicatorWindow {
+                otherWindow.orderOut(nil)
+            }
+        }
+
         window.setFrame(screen.frame, display: true)
 
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        window.isOpaque = true
+        window.backgroundColor = .black
         window.level = .screenSaver
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         window.isReleasedWhenClosed = false
@@ -83,6 +88,13 @@ public final class OverlayWindowManager {
         calibrationWindow?.orderOut(nil)
         calibrationWindow?.close()
         calibrationWindow = nil
+
+        // Restore dashboard window
+        NSApp.activate(ignoringOtherApps: true)
+        for window in NSApp.windows where window != indicatorWindow {
+            window.makeKeyAndOrderFront(nil)
+            break
+        }
     }
 
     // MARK: - Gaze Indicator Overlay Window

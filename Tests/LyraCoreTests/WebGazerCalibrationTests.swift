@@ -22,9 +22,9 @@ final class WebGazerCalibrationTests: XCTestCase {
         XCTAssertEqual(pattern.points.count, 9)
 
         let expectedCoords: [(Double, Double)] = [
-            (0.10, 0.10), (0.50, 0.10), (0.90, 0.10),
-            (0.10, 0.50), (0.50, 0.50), (0.90, 0.50),
-            (0.10, 0.90), (0.50, 0.90), (0.90, 0.90)
+            (0.12, 0.16), (0.50, 0.16), (0.88, 0.16),
+            (0.12, 0.50), (0.50, 0.50), (0.88, 0.50),
+            (0.12, 0.84), (0.50, 0.84), (0.88, 0.84)
         ]
 
         for (i, expected) in expectedCoords.enumerated() {
@@ -69,7 +69,7 @@ final class WebGazerCalibrationTests: XCTestCase {
             engine.observe(features: makeFeatures(pupilX: 0.15, pupilY: 0.15))
         }
 
-        // Click point 0 (top-left, 0.10, 0.10)
+        // Click point 0 (top-left, 0.12, 0.16)
         let clicked = engine.registerClick(pointIndex: 0)
         XCTAssertTrue(clicked)
 
@@ -78,8 +78,8 @@ final class WebGazerCalibrationTests: XCTestCase {
         XCTAssertEqual(engine.samples.count, 1)
 
         let sample = engine.samples[0]
-        XCTAssertEqual(sample.targetX, 0.10, accuracy: 1e-9)
-        XCTAssertEqual(sample.targetY, 0.10, accuracy: 1e-9)
+        XCTAssertEqual(sample.targetX, 0.12, accuracy: 1e-9)
+        XCTAssertEqual(sample.targetY, 0.16, accuracy: 1e-9)
         XCTAssertEqual(sample.features[0], 0.15, accuracy: 1e-9)
     }
 
@@ -113,11 +113,11 @@ final class WebGazerCalibrationTests: XCTestCase {
         engine.start()
 
         for _ in 0..<10 {
-            engine.observe(features: makeFeatures(pupilX: 0.50, pupilY: 0.10))
+            engine.observe(features: makeFeatures(pupilX: 0.50, pupilY: 0.16))
         }
 
-        // Point 1 is at (0.50, 0.10). Click slightly off at (0.51, 0.10) -> ~15 px away
-        let hit = engine.registerClick(atNormalized: (0.51, 0.10), screenSize: screen)
+        // Point 1 is at (0.50, 0.16). Click slightly off at (0.51, 0.16) -> ~15 px away
+        let hit = engine.registerClick(atNormalized: (0.51, 0.16), screenSize: screen)
         XCTAssertTrue(hit)
         XCTAssertEqual(engine.points[1].clicks, 1)
 
@@ -135,9 +135,9 @@ final class WebGazerCalibrationTests: XCTestCase {
 
         // 9 calibration positions
         let gridCoords: [(Double, Double)] = [
-            (0.10, 0.10), (0.50, 0.10), (0.90, 0.10),
-            (0.10, 0.50), (0.50, 0.50), (0.90, 0.50),
-            (0.10, 0.90), (0.50, 0.90), (0.90, 0.90)
+            (0.12, 0.16), (0.50, 0.16), (0.88, 0.16),
+            (0.12, 0.50), (0.50, 0.50), (0.88, 0.50),
+            (0.12, 0.84), (0.50, 0.84), (0.88, 0.84)
         ]
 
         // Click each of the 9 points 5 times (45 total)
