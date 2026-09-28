@@ -355,4 +355,15 @@ public struct CalibrationMap: Codable, Sendable, Equatable {
             timestamp: features.timestamp
         )
     }
+
+    /// Predicts screen coordinates directly from a raw feature vector (e.g. for evaluating calibration samples).
+    public func predict(vector: [Double]) -> (x: Double, y: Double)? {
+        guard isCalibrated, schemaVersion == GazeFeatures.schemaVersion, vector.count >= GazeFeatures.featureCount else {
+            return nil
+        }
+        let row = basis.designRow(for: vector)
+        let x = xModel.predict(designRow: row)
+        let y = yModel.predict(designRow: row)
+        return (min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0))
+    }
 }

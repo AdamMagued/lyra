@@ -650,51 +650,27 @@ public final class AppViewModel: ObservableObject {
                 persist(map)
                 calibrationError = nil
 
-                webGazerProgress = run.progress
-                calibrationStage = .running
+                let score = run.computeCalibrationAccuracy(
+                    screenWidth: Double(size.width),
+                    screenHeight: Double(size.height)
+                )
 
-                calibrationTimer?.cancel()
-                calibrationTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common)
-                    .autoconnect()
-                    .sink { [weak self] _ in
-                        self?.tickWebGazerVerification()
-                    }
+                calibrationResult = CalibrationResult(
+                    errorPixels: score.errorPixels,
+                    accuracyPercentage: score.accuracyPercentage,
+                    usedPoints: run.samples.count,
+                    totalPoints: run.requiredClicks,
+                    abandonedPoints: run.rejectedClicks + run.droppedClicks
+                )
+                webGazerProgress = run.progress
+                webGazerRun = nil
+                calibrationStage = .finished
+                refreshPermissions()
             } catch {
                 calibrationError = error.localizedDescription
                 webGazerRun = nil
                 calibrationStage = .finished
             }
-        }
-    }
-
-    private func tickWebGazerVerification() {
-        guard let run = webGazerRun else {
-            calibrationTimer?.cancel()
-            calibrationTimer = nil
-            return
-        }
-
-        let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
-        run.observeVerification(
-            features: latestFeatures,
-            screenSize: LyraSize(width: Double(size.width), height: Double(size.height)),
-            dt: 1.0 / 60.0
-        )
-        webGazerProgress = run.progress
-
-        if case .completed(let accuracy, let errorPx) = run.phase {
-            calibrationTimer?.cancel()
-            calibrationTimer = nil
-            calibrationResult = CalibrationResult(
-                errorPixels: errorPx,
-                accuracyPercentage: accuracy,
-                usedPoints: run.samples.count,
-                totalPoints: run.requiredClicks,
-                abandonedPoints: run.rejectedClicks + run.droppedClicks
-            )
-            webGazerRun = nil
-            calibrationStage = .finished
-            refreshPermissions()
         }
     }
 

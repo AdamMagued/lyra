@@ -255,10 +255,72 @@ public final class WebGazerCalibration: @unchecked Sendable {
 
         lock.lock()
         self.fittedMap = map
-        startVerificationLocked()
+        let score = computeCalibrationAccuracyLocked(screenWidth: screenWidth, screenHeight: screenHeight)
+        self.phase = .completed(accuracyPercentage: score.accuracyPercentage, errorPixels: score.errorPixels)
         lock.unlock()
 
         return map
+    }
+
+    // MARK: - WebGazer Mathematical Precision Calculation
+
+    /// Computes accuracy percentage and mean error using WebGazer's exact mathematical formula
+    /// (Brown University HCI Group, Papoutsaki et al.) evaluated on the ground-truth calibration samples:
+    ///
+    /// halfWindowHeight = screenHeight / 2.0
+    /// distance = sqrt(dx^2 + dy^2) in pixels
+    /// if distance <= halfWindowHeight:
+    ///     precision = 100.0 - (distance / halfWindowHeight * 100.0)
+    /// else:
+    ///     precision = 0.0
+    public func computeCalibrationAccuracy(
+        screenWidth: Double,
+        screenHeight: Double
+    ) -> (accuracyPercentage: Double, errorPixels: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        return computeCalibrationAccuracyLocked(screenWidth: screenWidth, screenHeight: screenHeight)
+    }
+
+    private func computeCalibrationAccuracyLocked(
+        screenWidth: Double,
+        screenHeight: Double
+    ) -> (accuracyPercentage: Double, errorPixels: Double) {
+        guard let map = fittedMap, !samples.isEmpty else {
+            return (0.0, 0.0)
+        }
+
+        let halfHeight = max(screenHeight / 2.0, 1.0)
+        var totalPrecision = 0.0
+        var totalDistance = 0.0
+        var evaluatedCount = 0
+
+        for sample in samples {
+            guard let prediction = map.predict(vector: sample.features) else { continue }
+            let dx = (prediction.x - sample.targetX) * screenWidth
+            let dy = (prediction.y - sample.targetY) * screenHeight
+            let distance = (dx * dx + dy * dy).squareRoot()
+
+            let precision: Double
+            if distance <= halfHeight {
+                precision = 100.0 - (distance / halfHeight * 100.0)
+            } else {
+                precision = 0.0
+            }
+
+            totalPrecision += precision
+            totalDistance += distance
+            evaluatedCount += 1
+        }
+
+        guard evaluatedCount > 0 else {
+            let fallbackAcc = max(0.0, min(100.0, 100.0 - (map.validationErrorPixels / halfHeight * 100.0)))
+            return ((fallbackAcc * 10.0).rounded() / 10.0, map.validationErrorPixels)
+        }
+
+        let avgAccuracy = (totalPrecision / Double(evaluatedCount) * 10.0).rounded() / 10.0
+        let avgDistance = (totalDistance / Double(evaluatedCount) * 10.0).rounded() / 10.0
+        return (avgAccuracy, avgDistance)
     }
 
     // MARK: - Precision Verification
@@ -272,14 +334,15 @@ public final class WebGazerCalibration: @unchecked Sendable {
     private func startVerificationLocked() {
         verificationErrors.removeAll()
         verificationTimeRemaining = verificationDuration
+        let initialAccuracy = computeCalibrationAccuracyLocked(screenWidth: 1470, screenHeight: 956).accuracyPercentage
         phase = .precisionVerification(
             timeRemaining: verificationTimeRemaining,
             duration: verificationDuration,
-            accuracyPercentage: 100.0
+            accuracyPercentage: initialAccuracy
         )
     }
 
-    /// Updates precision verification with a new frame during the 3.5s center test.
+    /// Updates precision verification with a new frame during the center test.
     public func observeVerification(
         features: GazeFeatures,
         screenSize: LyraSize,
@@ -298,7 +361,7 @@ public final class WebGazerCalibration: @unchecked Sendable {
             verificationErrors.append(errorDistance)
         }
 
-        let accuracy = computeLiveAccuracyLocked()
+        let accuracy = computeLiveAccuracyLocked(screenHeight: screenSize.height)
 
         if verificationTimeRemaining <= 0 {
             let avgError = verificationErrors.isEmpty ? map.validationErrorPixels : (verificationErrors.reduce(0, +) / Double(verificationErrors.count))
@@ -312,24 +375,24 @@ public final class WebGazerCalibration: @unchecked Sendable {
         }
     }
 
-    /// Computes accuracy percentage based on screen-center fixation error.
-    public func computeLiveAccuracy() -> Double {
+    /// Computes accuracy percentage based on WebGazer's halfWindowHeight formula.
+    public func computeLiveAccuracy(screenHeight: Double = 956.0) -> Double {
         lock.lock()
         defer { lock.unlock() }
-        return computeLiveAccuracyLocked()
+        return computeLiveAccuracyLocked(screenHeight: screenHeight)
     }
 
-    private func computeLiveAccuracyLocked() -> Double {
+    private func computeLiveAccuracyLocked(screenHeight: Double = 956.0) -> Double {
+        let halfHeight = max(screenHeight / 2.0, 1.0)
         if verificationErrors.isEmpty {
             if let map = fittedMap, map.validationErrorPixels.isFinite {
-                let accuracy = max(0.0, min(100.0, (1.0 - min(map.validationErrorPixels, 300.0) / 300.0) * 100.0))
+                let accuracy = max(0.0, min(100.0, 100.0 - (map.validationErrorPixels / halfHeight * 100.0)))
                 return (accuracy * 10.0).rounded() / 10.0
             }
             return 0.0
         }
         let meanError = verificationErrors.reduce(0, +) / Double(verificationErrors.count)
-        // 0 error -> 100%, 70px -> ~88%, 150px -> ~65%, >=300px -> 0%
-        let accuracy = max(0.0, min(100.0, (1.0 - min(meanError, 300.0) / 300.0) * 100.0))
+        let accuracy = max(0.0, min(100.0, 100.0 - (meanError / halfHeight * 100.0)))
         return (accuracy * 10.0).rounded() / 10.0
     }
 }

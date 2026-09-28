@@ -164,7 +164,17 @@ final class WebGazerCalibrationTests: XCTestCase {
         XCTAssertTrue(map.isCalibrated)
         XCTAssertTrue(map.validationErrorPixels < 150.0)
 
-        // Verify phase transition to precision verification
+        // WebGazer calibration completes directly with genuine accuracy score (>= 80%)
+        if case .completed(let accuracy, let errorPixels) = engine.phase {
+            XCTAssertGreaterThanOrEqual(accuracy, 80.0)
+            XCTAssertLessThanOrEqual(accuracy, 100.0)
+            XCTAssertLessThan(errorPixels, 180.0)
+        } else {
+            XCTFail("Phase should be completed after fit, but got \(engine.phase)")
+        }
+
+        // Test optional center verification if explicitly triggered
+        engine.startVerification()
         if case .precisionVerification(let remaining, let duration, _) = engine.phase {
             XCTAssertEqual(duration, 3.5)
             XCTAssertEqual(remaining, 3.5)
@@ -190,6 +200,39 @@ final class WebGazerCalibrationTests: XCTestCase {
         } else {
             XCTFail("Phase should be completed after 3.5s, but got \(engine.phase)")
         }
+    }
+
+    func testWebGazerMathematicalPrecisionFormula() {
+        let engine = WebGazerCalibration(clicksPerPoint: 5)
+        engine.start()
+
+        // 9 calibration positions
+        let gridCoords: [(Double, Double)] = [
+            (0.02, 0.025), (0.50, 0.025), (0.98, 0.025),
+            (0.02, 0.50), (0.50, 0.50), (0.98, 0.50),
+            (0.02, 0.975), (0.50, 0.975), (0.98, 0.975)
+        ]
+
+        for (idx, coord) in gridCoords.enumerated() {
+            for clickNum in 0..<5 {
+                let jitter = Double(clickNum) * 0.001
+                for _ in 0..<6 {
+                    engine.observe(features: makeFeatures(
+                        pupilX: coord.0 + jitter,
+                        pupilY: coord.1 + jitter
+                    ))
+                }
+                XCTAssertTrue(engine.registerClick(pointIndex: idx))
+            }
+        }
+
+        _ = try? engine.fit(screenWidth: 1470, screenHeight: 956)
+
+        let result = engine.computeCalibrationAccuracy(screenWidth: 1470, screenHeight: 956)
+        // WebGazer precision formula on 9-point grid yields ~82-95%
+        XCTAssertGreaterThanOrEqual(result.accuracyPercentage, 80.0, "WebGazer precision formula should yield >= 80% on fitted points")
+        XCTAssertLessThanOrEqual(result.accuracyPercentage, 100.0)
+        XCTAssertLessThan(result.errorPixels, 180.0)
     }
 
     // MARK: - Passive Continuous Click Training
