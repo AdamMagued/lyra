@@ -529,20 +529,6 @@ final class CalibrationTests: XCTestCase {
         }
         return rank
     }
-}
-
-private extension GazeFeatures {
-    /// Convenience for building a blink in tests.
-    func withEyeOpenness(_ openness: Double) -> GazeFeatures {
-        GazeFeatures(
-            pupilX: pupilX, pupilY: pupilY,
-            yaw: yaw, pitch: pitch, roll: roll,
-            faceX: faceX, faceY: faceY,
-            iod: iod, faceWidth: faceWidth,
-            eyeOpenness: openness,
-            confidence: confidence, timestamp: timestamp
-        )
-    }
 
     // MARK: - Diagnostics
 
@@ -557,7 +543,7 @@ private extension GazeFeatures {
         let samples = points.enumerated().map { index, point -> CalibrationSample in
             var features = [Double](repeating: 0.5, count: GazeFeatures.featureCount)
             // A feature that follows the target exactly...
-            features[0] = (point.0 + point.1) / 2
+            features[0] = point.0
             // ...and one that is pure noise with no relation to it.
             features[1] = index.isMultiple(of: 2) ? 0.2 : 0.8
             return CalibrationSample(
@@ -590,6 +576,134 @@ private extension GazeFeatures {
         let varying = (0..<10).map { Double($0) }
         XCTAssertEqual(CalibrationDiagnostics.correlation(constant, varying), 0)
         XCTAssertEqual(CalibrationDiagnostics.correlation(varying, constant), 0)
+    }
+
+    // MARK: - Head Movement Compensation
+
+    func testHeadYawCounterRotationCompensatesScreenPrediction() throws {
+        // A stationary user calibrates on standard grid with head held still (yaw ≈ 0)
+        let samples = gridPoints.map { point -> CalibrationSample in
+            let pupilX = 0.5 + (point.0 - 0.5) * 0.30
+            let pupilY = 0.5 + (point.1 - 0.5) * 0.30
+            let vec: [Double] = [
+                pupilX, pupilY,
+                0.001, -0.002, 0.000,
+                0.501, 0.499,
+                0.120, 0.350
+            ]
+            return CalibrationSample(
+                targetX: point.0, targetY: point.1,
+                features: vec, frameCount: 30, featureSpread: 0.005
+            )
+        }
+
+        let map = try GazeCalibrator().calibrate(
+            samples: samples, screenWidth: 1440, screenHeight: 900
+        )
+        XCTAssertNotNil(map.headBaseline)
+
+        // Target: center of screen (0.5, 0.5).
+        let neutral = GazeFeatures(
+            pupilX: 0.5, pupilY: 0.5,
+            yaw: 0.001, pitch: -0.002, roll: 0.0,
+            faceX: 0.501, faceY: 0.499, iod: 0.12, faceWidth: 0.35,
+            eyeOpenness: 0.9, confidence: 1.0
+        )
+        let neutralPred = try XCTUnwrap(map.predict(features: neutral))
+        XCTAssertEqual(neutralPred.x, 0.5, accuracy: 0.03)
+        XCTAssertEqual(neutralPred.y, 0.5, accuracy: 0.03)
+
+        // Now user yaws head to the left (+0.12 rad ≈ 7 deg) while keeping gaze fixated on center.
+        // Due to VOR, eyes counter-rotate to the right (pupilX moves left in eye frame: -0.12 * 0.38 ≈ -0.0456).
+        let yawed = GazeFeatures(
+            pupilX: 0.5 - 0.0456, pupilY: 0.5,
+            yaw: 0.12, pitch: -0.002, roll: 0.0,
+            faceX: 0.501, faceY: 0.499, iod: 0.12, faceWidth: 0.35,
+            eyeOpenness: 0.9, confidence: 1.0
+        )
+        let yawedPred = try XCTUnwrap(map.predict(features: yawed))
+        XCTAssertEqual(yawedPred.x, 0.5, accuracy: 0.03)
+        XCTAssertEqual(yawedPred.y, 0.5, accuracy: 0.03)
+    }
+
+    func testHeadDistanceScalingCompensatesScreenPrediction() throws {
+        let samples = gridPoints.map { point -> CalibrationSample in
+            let pupilX = 0.5 + (point.0 - 0.5) * 0.30
+            let pupilY = 0.5 + (point.1 - 0.5) * 0.30
+            let vec: [Double] = [
+                pupilX, pupilY, 0.0, 0.0, 0.0, 0.5, 0.5, 0.12, 0.35
+            ]
+            return CalibrationSample(
+                targetX: point.0, targetY: point.1,
+                features: vec, frameCount: 30, featureSpread: 0.005
+            )
+        }
+
+        let map = try GazeCalibrator().calibrate(
+            samples: samples, screenWidth: 1440, screenHeight: 900
+        )
+
+        // Target: point at (0.8, 0.5). At baseline distance (iod = 0.12), pupilX = 0.5 + 0.3 * 0.3 = 0.59.
+        let baselineFeature = GazeFeatures(
+            pupilX: 0.59, pupilY: 0.5, yaw: 0.0, pitch: 0.0, roll: 0.0,
+            faceX: 0.5, faceY: 0.5, iod: 0.12, faceWidth: 0.35,
+            eyeOpenness: 0.9, confidence: 1.0
+        )
+        let basePred = try XCTUnwrap(map.predict(features: baselineFeature))
+        XCTAssertEqual(basePred.x, 0.8, accuracy: 0.03)
+
+        // User leans in closer: iod increases from 0.12 to 0.15 (1.25x).
+        // Angular gaze to the same screen target requires larger pupil deflection: 0.09 * 1.25 = 0.1125 -> pupilX = 0.6125.
+        let closeFeature = GazeFeatures(
+            pupilX: 0.5 + 0.09 * 1.25, pupilY: 0.5, yaw: 0.0, pitch: 0.0, roll: 0.0,
+            faceX: 0.5, faceY: 0.5, iod: 0.15, faceWidth: 0.40,
+            eyeOpenness: 0.9, confidence: 1.0
+        )
+        let closePred = try XCTUnwrap(map.predict(features: closeFeature))
+        XCTAssertEqual(closePred.x, 0.8, accuracy: 0.03)
+    }
+
+    func testHeadTranslationParallaxCompensatesScreenPrediction() throws {
+        let samples = gridPoints.map { point -> CalibrationSample in
+            let pupilX = 0.5 + (point.0 - 0.5) * 0.30
+            let pupilY = 0.5 + (point.1 - 0.5) * 0.30
+            let vec: [Double] = [
+                pupilX, pupilY, 0.0, 0.0, 0.0, 0.5, 0.5, 0.12, 0.35
+            ]
+            return CalibrationSample(
+                targetX: point.0, targetY: point.1,
+                features: vec, frameCount: 30, featureSpread: 0.005
+            )
+        }
+
+        let map = try GazeCalibrator().calibrate(
+            samples: samples, screenWidth: 1440, screenHeight: 900
+        )
+
+        // User translates head right by 4 cm in camera frame (faceX shifts -0.05).
+        // Eyes counter-rotate to stay fixated on screen center (pupilX moves -0.0165).
+        let shifted = GazeFeatures(
+            pupilX: 0.5 - 0.0165, pupilY: 0.5,
+            yaw: 0.0, pitch: 0.0, roll: 0.0,
+            faceX: 0.45, faceY: 0.5, iod: 0.12, faceWidth: 0.35,
+            eyeOpenness: 0.9, confidence: 1.0
+        )
+        let shiftedPred = try XCTUnwrap(map.predict(features: shifted))
+        XCTAssertEqual(shiftedPred.x, 0.5, accuracy: 0.05)
+    }
+}
+
+private extension GazeFeatures {
+    /// Convenience for building a blink in tests.
+    func withEyeOpenness(_ openness: Double) -> GazeFeatures {
+        GazeFeatures(
+            pupilX: pupilX, pupilY: pupilY,
+            yaw: yaw, pitch: pitch, roll: roll,
+            faceX: faceX, faceY: faceY,
+            iod: iod, faceWidth: faceWidth,
+            eyeOpenness: openness,
+            confidence: confidence, timestamp: timestamp
+        )
     }
 }
 

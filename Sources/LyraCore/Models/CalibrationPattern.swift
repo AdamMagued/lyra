@@ -66,6 +66,31 @@ public struct CalibrationPattern: Sendable {
         holdDuration: 1.3
     )
 
+    /// WebGazer 9-point multi-click pattern: 3x3 grid at 0.10, 0.50, 0.90 for X and Y.
+    ///
+    /// Following the WebGazer research paradigm (Papoutsaki et al., IJCAI 2016),
+    /// 9 calibration points are active simultaneously across the screen:
+    /// (0.10, 0.10), (0.50, 0.10), (0.90, 0.10),
+    /// (0.10, 0.50), (0.50, 0.50), (0.90, 0.50),
+    /// (0.10, 0.90), (0.50, 0.90), (0.90, 0.90).
+    public static let webGazer9 = CalibrationPattern(
+        points: [
+            Point(id: 0, x: 0.10, y: 0.10),
+            Point(id: 1, x: 0.50, y: 0.10),
+            Point(id: 2, x: 0.90, y: 0.10),
+            Point(id: 3, x: 0.10, y: 0.50),
+            Point(id: 4, x: 0.50, y: 0.50),
+            Point(id: 5, x: 0.90, y: 0.50),
+            Point(id: 6, x: 0.10, y: 0.90),
+            Point(id: 7, x: 0.50, y: 0.90),
+            Point(id: 8, x: 0.90, y: 0.90)
+        ],
+        name: "WebGazer 9-Point (3×3)",
+        holdDuration: 0
+    )
+
+    public static let ninePoint = webGazer9
+
     /// 16 points in a 4x4 grid, for click-driven calibration.
     ///
     /// Coverage matters more than replication here. The fit has ~20 terms, and what

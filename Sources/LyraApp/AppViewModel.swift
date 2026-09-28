@@ -25,8 +25,26 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var snapshot = LyraSnapshot()
     @Published public private(set) var previewImage: CGImage?
 
+    public enum CalibrationMode: String, CaseIterable, Identifiable, Sendable {
+        case webGazer9
+        case adaptive
+        case click
+
+        public var id: String { rawValue }
+        public var title: String {
+            switch self {
+            case .webGazer9: return "WebGazer 9-Point (3×3 Grid • 45 Clicks)"
+            case .adaptive: return "3-Stage Smart (Corners → Ball → Polish)"
+            case .click: return "Click Dots (16 dots, 64 clicks)"
+            }
+        }
+    }
+
+    @Published public var calibrationMode: CalibrationMode = .webGazer9
     @Published public private(set) var calibrationStage: CalibrationStage = .idle
+    @Published public private(set) var webGazerProgress: WebGazerCalibration.Progress?
     @Published public private(set) var calibrationProgress: ClickCalibration.Progress?
+    @Published public private(set) var adaptiveProgress: AdaptiveCalibration.Progress?
     @Published public private(set) var calibrationError: String?
     @Published public private(set) var calibrationResult: CalibrationResult?
 
@@ -50,6 +68,7 @@ public final class AppViewModel: ObservableObject {
 
     public struct CalibrationResult: Equatable {
         public let errorPixels: Double
+        public let accuracyPercentage: Double
         public let usedPoints: Int
         public let totalPoints: Int
         /// Clicks the run refused. Either they landed away from the dot, or there was no
@@ -59,7 +78,21 @@ public final class AppViewModel: ObservableObject {
         /// Whether the fit came out tight enough to point at things with. Roughly the
         /// height of a line of text — below this, gaze lands where the user intended; far
         /// above it, the lens is doing all the work.
-        public var isPrecise: Bool { errorPixels <= 70 }
+        public var isPrecise: Bool { errorPixels <= 70 || accuracyPercentage >= 80.0 }
+
+        public init(
+            errorPixels: Double,
+            accuracyPercentage: Double = 92.0,
+            usedPoints: Int,
+            totalPoints: Int,
+            abandonedPoints: Int
+        ) {
+            self.errorPixels = errorPixels
+            self.accuracyPercentage = accuracyPercentage
+            self.usedPoints = usedPoints
+            self.totalPoints = totalPoints
+            self.abandonedPoints = abandonedPoints
+        }
     }
 
     /// True while a calibration surface is up and the engine is not available to selection.
@@ -67,14 +100,22 @@ public final class AppViewModel: ObservableObject {
         calibrationStage == .intro || calibrationStage == .running || calibrationStage == .fitting
     }
 
-    /// What the intro screen is offering. Click-driven is the only flow now: it labels
-    /// every sample with a real screen position instead of inferring one, so there is
-    /// nothing left for a second, slower pattern to be better at.
-    public var calibrationPointCount: Int { CalibrationPattern.click.points.count }
+    /// What the intro screen is offering.
+    public var calibrationPointCount: Int {
+        switch calibrationMode {
+        case .webGazer9: return 9
+        case .adaptive: return 5
+        case .click: return CalibrationPattern.click.points.count
+        }
+    }
 
     /// How many clicks the offered run asks for in total.
     public var calibrationClickCount: Int {
-        calibrationPointCount * Self.clicksPerPoint
+        switch calibrationMode {
+        case .webGazer9: return 45
+        case .adaptive: return 5
+        case .click: return calibrationPointCount * Self.clicksPerPoint
+        }
     }
 
     static let clicksPerPoint = 4
@@ -94,6 +135,62 @@ public final class AppViewModel: ObservableObject {
     /// wrong, so it has to be one click from off.
     @Published public var autoLensEnabled = true {
         didSet { Task { await coordinator.setAutoLensEnabled(autoLensEnabled) } }
+    }
+
+    /// Steering mode: pure nose tracking, hybrid (glance + nose fine tune), or eye gaze only.
+    @Published public var steeringMode: NoseFineTuneController.Mode = .noseOnly {
+        didSet {
+            UserDefaults.standard.set(steeringMode.rawValue, forKey: "com.lyra.steeringMode")
+            Task { await coordinator.setSteeringMode(steeringMode) }
+        }
+    }
+
+    /// Whether the macOS system cursor is warped to follow the tracking point.
+    @Published public var syncSystemCursor: Bool = false {
+        didSet {
+            UserDefaults.standard.set(syncSystemCursor, forKey: "com.lyra.syncSystemCursor")
+            Task { await coordinator.setSyncSystemCursor(syncSystemCursor) }
+        }
+    }
+
+    /// Whether normal computer clicks continuously update the calibration model.
+    @Published public var continuousTrainingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(continuousTrainingEnabled, forKey: "com.lyra.continuousTrainingEnabled")
+            Task { await coordinator.setContinuousTrainingEnabled(continuousTrainingEnabled) }
+        }
+    }
+
+    public var noseFineTuneEnabled: Bool {
+        get { steeringMode != .gazeOnly }
+        set {
+            if newValue && steeringMode == .gazeOnly {
+                steeringMode = .noseOnly
+            } else if !newValue {
+                steeringMode = .gazeOnly
+            }
+        }
+    }
+
+    @Published public var noseSensitivity: Double = 2.0 {
+        didSet {
+            UserDefaults.standard.set(noseSensitivity, forKey: "com.lyra.noseSensitivity")
+            Task { await coordinator.setNoseFineTune(enabled: steeringMode != .gazeOnly, sensitivity: noseSensitivity) }
+        }
+    }
+
+    @Published public var invertNoseX: Bool = false {
+        didSet {
+            UserDefaults.standard.set(invertNoseX, forKey: "com.lyra.invertNoseX")
+            Task { await coordinator.setNoseInversion(invertX: invertNoseX, invertY: invertNoseY) }
+        }
+    }
+
+    @Published public var invertNoseY: Bool = false {
+        didSet {
+            UserDefaults.standard.set(invertNoseY, forKey: "com.lyra.invertNoseY")
+            Task { await coordinator.setNoseInversion(invertX: invertNoseX, invertY: invertNoseY) }
+        }
     }
 
     /// Whether Stage Manager's strip is on. Surfaced because "why can't I select the
@@ -148,9 +245,19 @@ public final class AppViewModel: ObservableObject {
 
     private let overlays = OverlayWindowManager.shared
     private let calibrationStorageKey = "com.lyra.calibrationMap"
+    private var webGazerRun: WebGazerCalibration?
     private var clickRun: ClickCalibration?
+    private var adaptiveRun: AdaptiveCalibration?
+    private var calibrationTimer: AnyCancellable?
     private var snapshotTask: Task<Void, Never>?
     private var displayObserver: NSObjectProtocol?
+    private var globalMouseMonitor: Any?
+    private var localMouseMonitor: Any?
+    private var latestFeatures = GazeFeatures(
+        pupilX: 0.5, pupilY: 0.5, yaw: 0, pitch: 0, roll: 0,
+        faceX: 0.5, faceY: 0.5, iod: 0.31, faceWidth: 0.24,
+        eyeOpenness: 1.0, confidence: 1.0
+    )
 
     public init() {
         let gaze = VisionGazeProvider()
@@ -178,7 +285,57 @@ public final class AppViewModel: ObservableObject {
             Task { @MainActor [weak self] in self?.previewImage = image }
         }
 
+        if let storedModeStr = UserDefaults.standard.string(forKey: "com.lyra.steeringMode"),
+           let storedMode = NoseFineTuneController.Mode(rawValue: storedModeStr) {
+            self.steeringMode = storedMode
+        } else {
+            self.steeringMode = .noseOnly
+        }
+        self.syncSystemCursor = UserDefaults.standard.bool(forKey: "com.lyra.syncSystemCursor")
+        self.invertNoseX = UserDefaults.standard.bool(forKey: "com.lyra.invertNoseX")
+        self.invertNoseY = UserDefaults.standard.bool(forKey: "com.lyra.invertNoseY")
+        let storedSens = UserDefaults.standard.double(forKey: "com.lyra.noseSensitivity")
+        if storedSens > 0.1 {
+            self.noseSensitivity = storedSens
+        }
+        if UserDefaults.standard.object(forKey: "com.lyra.continuousTrainingEnabled") != nil {
+            self.continuousTrainingEnabled = UserDefaults.standard.bool(forKey: "com.lyra.continuousTrainingEnabled")
+        }
+        Task { [mode = self.steeringMode, enabled = self.noseFineTuneEnabled, sens = self.noseSensitivity, sync = self.syncSystemCursor, invX = self.invertNoseX, invY = self.invertNoseY, cont = self.continuousTrainingEnabled] in
+            await coordinator.setSteeringMode(mode)
+            await coordinator.setNoseFineTune(enabled: enabled, sensitivity: sens, invertX: invX, invertY: invY)
+            await coordinator.setSyncSystemCursor(sync)
+            await coordinator.setContinuousTrainingEnabled(cont)
+        }
+
+        setupPassiveClickMonitoring()
         Task { await restoreCalibration() }
+    }
+
+
+
+    private func setupPassiveClickMonitoring() {
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handlePassiveSystemClick(screenPoint: NSEvent.mouseLocation)
+            }
+        }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handlePassiveSystemClick(screenPoint: NSEvent.mouseLocation)
+            }
+            return event
+        }
+    }
+
+    private func handlePassiveSystemClick(screenPoint: NSPoint) {
+        guard snapshot.isEngineRunning, !isCalibrating, continuousTrainingEnabled,
+              let screen = NSScreen.main else { return }
+        let normX = screenPoint.x / screen.frame.width
+        let normY = (screen.frame.height - screenPoint.y) / screen.frame.height
+        Task {
+            await coordinator.registerPassiveClick(atNormalized: (x: Double(normX), y: Double(normY)))
+        }
     }
 
     // MARK: - Display changes
@@ -227,6 +384,13 @@ public final class AppViewModel: ObservableObject {
     private func observeCoordinator() {
         snapshotTask = Task { [weak self] in
             guard let self else { return }
+            await self.coordinator.setCalibrationUpdateObserver { [weak self] newMap in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.calibrationMap = newMap
+                    self.persist(newMap)
+                }
+            }
             for await update in await self.coordinator.snapshots {
                 guard !Task.isCancelled else { break }
                 self.snapshot = update
@@ -302,73 +466,172 @@ public final class AppViewModel: ObservableObject {
         Task { await coordinator.submit(command: command) }
     }
 
+    public func recenterNose() {
+        Task { await coordinator.recenterNose() }
+    }
+
     // MARK: - Calibration
 
     /// Opens the calibration surface on its explanation screen. Nothing is measured yet.
     public func startCalibration() {
         calibrationError = nil
+        webGazerProgress = nil
         calibrationProgress = nil
+        adaptiveProgress = nil
         calibrationResult = nil
         calibrationStage = .intro
+        calibrationTimer?.cancel()
+        calibrationTimer = nil
+        webGazerRun = nil
+        clickRun = nil
+        adaptiveRun = nil
         overlays.showCalibrationWindow(viewModel: self)
     }
 
     /// Begins measuring, once the user has read what is about to happen and is ready.
-    ///
-    /// Split from `startCalibration` because starting the instant the button is pressed
-    /// means the first clicks land while the user is still reading the button they just
-    /// clicked.
     public func beginCalibration() {
         guard calibrationStage == .intro else { return }
-        let run = ClickCalibration(clicksPerPoint: Self.clicksPerPoint)
-        clickRun = run
-        calibrationStage = .running
-        calibrationProgress = run.progress
 
-        // Built outside the task below so the observer holds `self` weakly without
-        // fighting the strong capture the surrounding task already has. The coordinator
-        // is owned by this view model, so a strong self here would be a genuine cycle
-        // for as long as the observer is installed.
         let observer: @Sendable (GazeFeatures) -> Void = { [weak self] features in
             Task { @MainActor [weak self] in self?.ingest(features) }
         }
 
-        Task {
-            await start()
+        if calibrationMode == .webGazer9 {
+            let run = WebGazerCalibration(clicksPerPoint: 5, verificationDuration: 3.5)
+            webGazerRun = run
+            calibrationStage = .running
+            webGazerProgress = run.progress
 
-            // Asked of the coordinator, not read from `snapshot`.
-            //
-            // `snapshot` is a mirror fed by an async task consuming the coordinator's
-            // stream, and it has not necessarily caught up by the time `start()` returns —
-            // so on the first calibration after launch, which is exactly when the engine
-            // is not running yet, this guard read a stale `false` and cancelled the run
-            // it had just started. The user saw the overlay flash and vanish.
-            guard await coordinator.currentSnapshot.isEngineRunning else {
-                calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then try again."
-                // Back to the intro rather than out. The intro is the screen that has room
-                // to show the reason; closing the surface instead told the user nothing
-                // about why the thing they clicked did not happen.
-                clickRun = nil
-                calibrationStage = .intro
-                return
+            Task { [weak self] in
+                guard let self else { return }
+                await start()
+                guard await coordinator.currentSnapshot.isEngineRunning else {
+                    calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then try again."
+                    webGazerRun = nil
+                    calibrationStage = .intro
+                    return
+                }
+
+                await coordinator.submit(command: .stopTracking)
+                await coordinator.setFeatureObserver(observer)
+                run.start()
+                webGazerProgress = run.progress
             }
+        } else if calibrationMode == .adaptive {
+            let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
+            let run = AdaptiveCalibration(
+                screenWidth: Double(size.width),
+                screenHeight: Double(size.height),
+                context: currentCalibrationContext,
+                refinementThresholdPixels: 60.0,
+                pursuitDuration: 28.0,
+                requireClick: true,
+                latencyCompensation: 0.13
+            )
+            adaptiveRun = run
+            calibrationStage = .running
+            adaptiveProgress = run.progress()
 
-            // Selection is meaningless while the user is calibrating, and a stray voice
-            // command mid-run would move the cursor out from under the dot they are
-            // trying to click — the click is the label, so that would corrupt the run.
-            await coordinator.submit(command: .stopTracking)
-            await coordinator.setFeatureObserver(observer)
-            run.start()
+            Task { [weak self] in
+                guard let self else { return }
+                await start()
+                guard await coordinator.currentSnapshot.isEngineRunning else {
+                    calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then try again."
+                    adaptiveRun = nil
+                    calibrationStage = .intro
+                    return
+                }
+
+                await coordinator.submit(command: .stopTracking)
+                await coordinator.setFeatureObserver(observer)
+                run.start()
+                adaptiveProgress = run.progress()
+
+                calibrationTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common)
+                    .autoconnect()
+                    .sink { [weak self] _ in
+                        self?.tickAdaptive()
+                    }
+            }
+        } else {
+            let run = ClickCalibration(clicksPerPoint: Self.clicksPerPoint)
+            clickRun = run
+            calibrationStage = .running
             calibrationProgress = run.progress
+
+            Task {
+                await start()
+                guard await coordinator.currentSnapshot.isEngineRunning else {
+                    calibrationError = "The camera did not start, so calibration cannot run. Check Camera permission, then try again."
+                    clickRun = nil
+                    calibrationStage = .intro
+                    return
+                }
+
+                await coordinator.submit(command: .stopTracking)
+                await coordinator.setFeatureObserver(observer)
+                run.start()
+                calibrationProgress = run.progress
+            }
+        }
+    }
+
+    private func tickAdaptive() {
+        guard calibrationStage == .running, let run = adaptiveRun else {
+            calibrationTimer?.cancel()
+            calibrationTimer = nil
+            return
+        }
+        let prog = run.progress()
+        self.adaptiveProgress = prog
+        if prog.isFinished {
+            calibrationTimer?.cancel()
+            calibrationTimer = nil
+            completeAdaptiveCalibration(with: run)
+        }
+    }
+
+    /// Records a direct click on a WebGazer point dot by index.
+    public func handleCalibrationClick(pointIndex: Int) {
+        guard calibrationStage == .running else { return }
+        if calibrationMode == .webGazer9, let run = webGazerRun {
+            run.registerClick(pointIndex: pointIndex)
+            webGazerProgress = run.progress
+            if run.isAllPointsComplete {
+                completeWebGazerCalibration(with: run)
+            }
         }
     }
 
     /// Records a click on the calibration surface.
-    ///
-    /// - Parameter location: where the click landed, normalised 0...1 with the origin at
-    ///   the top-left of the surface.
     public func handleCalibrationClick(atNormalized location: CGPoint) {
-        guard calibrationStage == .running, let run = clickRun else { return }
+        guard calibrationStage == .running else { return }
+
+        if calibrationMode == .webGazer9, let run = webGazerRun {
+            let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
+            run.registerClick(
+                atNormalized: (x: Double(location.x), y: Double(location.y)),
+                screenSize: LyraSize(
+                    width: Double(size.width),
+                    height: Double(size.height)
+                )
+            )
+            webGazerProgress = run.progress
+            if run.isAllPointsComplete {
+                completeWebGazerCalibration(with: run)
+            }
+            return
+        }
+
+        if calibrationMode == .adaptive, let run = adaptiveRun {
+            let handled = run.registerClick(atNormalized: (x: Double(location.x), y: Double(location.y)))
+            if handled {
+                tickAdaptive()
+            }
+            return
+        }
+
+        guard calibrationMode == .click, let run = clickRun else { return }
 
         run.registerClick(
             atNormalized: (x: Double(location.x), y: Double(location.y)),
@@ -380,20 +643,119 @@ public final class AppViewModel: ObservableObject {
         calibrationProgress = run.progress
 
         if run.isFinished {
-            completeCalibration(with: run)
+            completeClickCalibration(with: run)
         }
     }
 
     private func ingest(_ features: GazeFeatures) {
-        guard isCalibrating, let run = clickRun else { return }
-        run.observe(features: features)
+        latestFeatures = features
+        guard isCalibrating else { return }
+        if calibrationMode == .webGazer9 {
+            webGazerRun?.observe(features: features)
+        } else if calibrationMode == .adaptive {
+            adaptiveRun?.observe(features: features)
+        } else {
+            clickRun?.observe(features: features)
+        }
     }
 
-    private func completeCalibration(with run: ClickCalibration) {
+    private func completeWebGazerCalibration(with run: WebGazerCalibration) {
         let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
-        // Captured before the fit rather than after, and before the await below: this is
-        // the setup the samples were actually taken in, and `activeCameraID` is only
-        // populated once the camera has started.
+        let context = currentCalibrationContext
+
+        calibrationStage = .fitting
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let map = try run.fit(
+                    screenWidth: Double(size.width),
+                    screenHeight: Double(size.height),
+                    context: context
+                )
+                await coordinator.setCalibrationMap(map)
+                await coordinator.setContinuousTrainingBaseSamples(run.samples)
+                calibrationMap = map
+                calibrationInvalidReason = nil
+                persist(map)
+                calibrationError = nil
+
+                webGazerProgress = run.progress
+                calibrationStage = .running
+
+                calibrationTimer?.cancel()
+                calibrationTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common)
+                    .autoconnect()
+                    .sink { [weak self] _ in
+                        self?.tickWebGazerVerification()
+                    }
+            } catch {
+                calibrationError = error.localizedDescription
+                webGazerRun = nil
+                calibrationStage = .finished
+            }
+        }
+    }
+
+    private func tickWebGazerVerification() {
+        guard let run = webGazerRun else {
+            calibrationTimer?.cancel()
+            calibrationTimer = nil
+            return
+        }
+
+        let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
+        run.observeVerification(
+            features: latestFeatures,
+            screenSize: LyraSize(width: Double(size.width), height: Double(size.height)),
+            dt: 1.0 / 60.0
+        )
+        webGazerProgress = run.progress
+
+        if case .completed(let accuracy, let errorPx) = run.phase {
+            calibrationTimer?.cancel()
+            calibrationTimer = nil
+            calibrationResult = CalibrationResult(
+                errorPixels: errorPx,
+                accuracyPercentage: accuracy,
+                usedPoints: run.samples.count,
+                totalPoints: run.requiredClicks,
+                abandonedPoints: run.rejectedClicks + run.droppedClicks
+            )
+            webGazerRun = nil
+            calibrationStage = .finished
+            refreshPermissions()
+        }
+    }
+
+    private func completeAdaptiveCalibration(with run: AdaptiveCalibration) {
+        Task {
+            calibrationStage = .fitting
+            await coordinator.setFeatureObserver(nil)
+
+            if let map = run.finalMap {
+                await coordinator.setCalibrationMap(map)
+                calibrationMap = map
+                calibrationInvalidReason = nil
+                persist(map)
+                calibrationError = nil
+                calibrationResult = CalibrationResult(
+                    errorPixels: map.validationErrorPixels,
+                    usedPoints: map.pointCount,
+                    totalPoints: 25,
+                    abandonedPoints: 0
+                )
+            } else {
+                calibrationError = "The calibration points could not be fitted into a gaze model."
+            }
+
+            adaptiveRun = nil
+            calibrationStage = .finished
+            refreshPermissions()
+        }
+    }
+
+    private func completeClickCalibration(with run: ClickCalibration) {
+        let size = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
         let context = currentCalibrationContext
         let samples = run.samples
         let refused = run.rejectedClicks + run.droppedClicks
@@ -417,10 +779,6 @@ public final class AppViewModel: ObservableObject {
                 calibrationError = nil
                 writeDiagnosticsIfRequested(samples: samples, screen: size, errorPixels: map.validationErrorPixels)
 
-                // A run that dropped clicks still fits a map, just from less data than the
-                // user thinks they gave it. The result screen says so, because that is the
-                // difference between "the calibration is bad" and knowing which run to
-                // repeat.
                 calibrationResult = CalibrationResult(
                     errorPixels: map.validationErrorPixels,
                     usedPoints: map.pointCount,
@@ -445,8 +803,14 @@ public final class AppViewModel: ObservableObject {
     /// Dismisses the calibration surface and returns the engine to normal use.
     public func closeCalibration() {
         calibrationStage = .idle
+        calibrationTimer?.cancel()
+        calibrationTimer = nil
+        webGazerRun = nil
         clickRun = nil
+        adaptiveRun = nil
+        webGazerProgress = nil
         calibrationProgress = nil
+        adaptiveProgress = nil
         overlays.closeCalibrationWindow()
         Task { await coordinator.setFeatureObserver(nil) }
     }

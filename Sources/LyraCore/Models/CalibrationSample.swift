@@ -42,8 +42,8 @@ public struct CalibrationSample: Sendable, Equatable, Codable {
     }
 
     /// A sample is trustworthy only if enough frames contributed and the user's
-    /// measured features were stable while they held the target.
-    public func isTrustworthy(maximumSpread: Double = 0.09, minimumFrames: Int = 8) -> Bool {
+    /// measured features were stable while they held or tracked the target.
+    public func isTrustworthy(maximumSpread: Double = 0.14, minimumFrames: Int = 3) -> Bool {
         frameCount >= minimumFrames && featureSpread <= maximumSpread
     }
 

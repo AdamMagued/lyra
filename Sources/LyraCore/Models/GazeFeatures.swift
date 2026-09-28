@@ -17,7 +17,7 @@ import Foundation
 public struct GazeFeatures: Sendable, Equatable, Codable {
     /// Bump when the meaning or ordering of `vector` changes. Saved calibrations
     /// carry the version they were fit against and are discarded on mismatch.
-    public static let schemaVersion: Int = 2
+    public static let schemaVersion: Int = 3
 
     /// Horizontal pupil position averaged across both eyes, normalised within the
     /// eye-corner axis so it is invariant to head roll. Roughly 0...1.
@@ -116,6 +116,26 @@ public struct GazeFeatures: Sendable, Equatable, Codable {
             eyeOpenness: eyeOpenness,
             confidence: confidence,
             timestamp: date
+        )
+    }
+
+    /// Returns a copy of these features with pupil positions and head pose compensated
+    /// relative to a reference baseline head posture.
+    public func compensated(relativeTo baseline: CalibrationMap.HeadBaseline) -> GazeFeatures {
+        let comp = baseline.compensate(vector: vector)
+        return GazeFeatures(
+            pupilX: comp[0],
+            pupilY: comp[1],
+            yaw: comp[2],
+            pitch: comp[3],
+            roll: comp[4],
+            faceX: comp[5],
+            faceY: comp[6],
+            iod: comp[7],
+            faceWidth: comp[8],
+            eyeOpenness: eyeOpenness,
+            confidence: confidence,
+            timestamp: timestamp
         )
     }
 }

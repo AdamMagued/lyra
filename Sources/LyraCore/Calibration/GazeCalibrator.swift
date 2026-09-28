@@ -82,6 +82,9 @@ public struct GazeCalibrator: Sendable {
             throw CalibrationError.fitFailed
         }
 
+        // Establish baseline head posture and distance from the accepted calibration points.
+        let baseline = CalibrationMap.HeadBaseline.compute(from: pruned.map(\.features))
+
         let design = pruned.map { basis.designRow(for: $0.features) }
         let targetXs = pruned.map(\.targetX)
         let targetYs = pruned.map(\.targetY)
@@ -134,6 +137,7 @@ public struct GazeCalibrator: Sendable {
             xModel: xModel,
             yModel: yModel,
             basis: basis,
+            headBaseline: baseline,
             context: context
         )
     }

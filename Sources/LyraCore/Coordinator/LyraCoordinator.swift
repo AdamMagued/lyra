@@ -26,7 +26,10 @@ public actor LyraCoordinator {
     private let lens: TargetLens
     private let riskPolicy: RiskPolicy
     private let gazeFilter: OneEuroFilter
+    private let noseFineTune: NoseFineTuneController
     private var stabilizer: TargetStabilizer
+    private var syncSystemCursor: Bool = false
+    private let continuousTrainer = ContinuousClickTrainer()
 
     // MARK: - State
 
@@ -71,6 +74,11 @@ public actor LyraCoordinator {
     /// to observe frames without either duplicating the camera pipeline or racing over
     /// one continuation.
     private var featureObserver: (@Sendable (GazeFeatures) -> Void)?
+    private var calibrationUpdateObserver: (@Sendable (CalibrationMap) -> Void)?
+
+    public func setCalibrationUpdateObserver(_ observer: (@Sendable (CalibrationMap) -> Void)?) {
+        self.calibrationUpdateObserver = observer
+    }
 
     // MARK: - Tasks
 
@@ -92,6 +100,7 @@ public actor LyraCoordinator {
         lens: TargetLens = .default,
         stabilizer: TargetStabilizer = TargetStabilizer(),
         gazeFilter: OneEuroFilter = OneEuroFilter(),
+        noseFineTune: NoseFineTuneController = NoseFineTuneController(),
         riskPolicy: RiskPolicy = RiskPolicy(),
         autoLensPolicy: AutoLensPolicy = .default
     ) {
@@ -104,6 +113,7 @@ public actor LyraCoordinator {
         self.lens = lens
         self.stabilizer = stabilizer
         self.gazeFilter = gazeFilter
+        self.noseFineTune = noseFineTune
         self.riskPolicy = riskPolicy
         self.autoLens = AutoLensTracker(policy: autoLensPolicy)
     }
@@ -137,9 +147,42 @@ public actor LyraCoordinator {
         publish(force: true)
     }
 
+    public func setNoseFineTune(enabled: Bool, sensitivity: Double? = nil, invertX: Bool? = nil, invertY: Bool? = nil) {
+        noseFineTune.configure(isEnabled: enabled, sensitivity: sensitivity, invertX: invertX, invertY: invertY)
+        if !enabled {
+            noseFineTune.reset()
+        }
+    }
+
+    public func setNoseInversion(invertX: Bool, invertY: Bool) {
+        noseFineTune.configure(invertX: invertX, invertY: invertY)
+    }
+
+    public func setSteeringMode(_ mode: NoseFineTuneController.Mode) {
+        noseFineTune.configure(mode: mode)
+        if mode == .noseOnly && snapshot.isEngineRunning {
+            snapshot.trackingState = .tracking
+            snapshot.statusMessage = "Nose Steering — Press 'C' to recenter"
+        }
+        publish(force: true)
+    }
+
+    public func recenterNose() {
+        noseFineTune.recenter()
+        if snapshot.isEngineRunning {
+            snapshot.statusMessage = "Nose recentered to center"
+            publish(force: true)
+        }
+    }
+
+    public func setSyncSystemCursor(_ sync: Bool) {
+        syncSystemCursor = sync
+    }
+
     public func setCalibrationMap(_ map: CalibrationMap) {
         calibrationMap = map
         gazeFilter.reset()
+        noseFineTune.reset()
         stabilizer.reset()
         displayedGaze = nil
         lastScreenPoint = nil
@@ -153,13 +196,40 @@ public actor LyraCoordinator {
         setCalibrationMap(map)
     }
 
+    public func setContinuousTrainingEnabled(_ enabled: Bool) {
+        continuousTrainer.isEnabled = enabled
+    }
+
+    public func setContinuousTrainingBaseSamples(_ samples: [CalibrationSample]) {
+        continuousTrainer.setBaseSamples(samples)
+    }
+
+    public func registerPassiveClick(atNormalized location: (x: Double, y: Double)) {
+        guard continuousTrainer.isEnabled, calibrationMap.isCalibrated else { return }
+        if let newMap = continuousTrainer.registerClick(
+            atNormalized: location,
+            screenSize: screenSize,
+            context: calibrationMap.context
+        ) {
+            self.calibrationMap = newMap
+            snapshot.statusMessage = String(format: "Calibrated — ±%.0f px (live refined)", newMap.validationErrorPixels)
+            publish()
+            calibrationUpdateObserver?(newMap)
+        }
+    }
+
     // MARK: - Lifecycle
 
     public func start() async throws {
         guard !snapshot.isEngineRunning else { return }
 
         snapshot.errorMessage = nil
-        snapshot.trackingState = calibrationMap.isCalibrated ? .tracking : .uncalibrated
+        if noseFineTune.mode == .noseOnly {
+            snapshot.trackingState = .tracking
+            snapshot.statusMessage = "Nose Steering — Press 'C' to recenter"
+        } else {
+            snapshot.trackingState = calibrationMap.isCalibrated ? .tracking : .uncalibrated
+        }
 
         do {
             try await gazeProvider.start()
@@ -197,6 +267,7 @@ public actor LyraCoordinator {
 
         stabilizer.reset()
         gazeFilter.reset()
+        noseFineTune.reset()
         // Also clears zoomVisible, which stopping otherwise leaves set — the overlay
         // would keep drawing a lens over a screen nothing is tracking.
         setZoom(false)
@@ -232,12 +303,46 @@ public actor LyraCoordinator {
     }
 
     /// One frame of the pipeline, start to finish.
-    func handle(features: GazeFeatures) {
+    func handle(features: GazeFeatures) async {
         // Deliberately before the calibration gate below: the calibration run needs every
         // frame, including the ones this method is about to discard for having no map yet.
         featureObserver?(features)
+        continuousTrainer.observe(features: features)
 
         snapshot.gazeConfidence = features.confidence
+
+        // Pure Nose Steering Mode: calibration and blink-dropping are bypassed!
+        if noseFineTune.mode == .noseOnly {
+            guard features.confidence > 0.25 else {
+                snapshot.trackingState = .faceLost
+                publish()
+                return
+            }
+
+            let steered = noseFineTune.updateNoseOnly(
+                yaw: features.yaw,
+                pitch: features.pitch,
+                now: features.timestamp
+            )
+
+            let point = LyraPoint(
+                x: Double(steered.x) * Double(screenSize.width),
+                y: Double(steered.y) * Double(screenSize.height)
+            )
+
+            displayedGaze = point
+            lastScreenPoint = point
+            snapshot.gazePoint = point
+            snapshot.trackingState = .tracking
+
+            if syncSystemCursor {
+                try? await inputController.moveCursor(toScreenPoint: (point.x, point.y))
+            }
+
+            updateSelection(for: point, confidence: features.confidence)
+            publish()
+            return
+        }
 
         guard calibrationMap.isCalibrated else {
             snapshot.trackingState = .uncalibrated
@@ -261,9 +366,16 @@ public actor LyraCoordinator {
         }
 
         let smoothed = gazeFilter.filter(predicted)
+        let steered = noseFineTune.update(
+            rawGaze: CGPoint(x: smoothed.x, y: smoothed.y),
+            yaw: features.yaw,
+            pitch: features.pitch,
+            now: features.timestamp
+        )
+
         let point = LyraPoint(
-            x: smoothed.x * Double(screenSize.width),
-            y: smoothed.y * Double(screenSize.height)
+            x: Double(steered.x) * Double(screenSize.width),
+            y: Double(steered.y) * Double(screenSize.height)
         )
 
         displayedGaze = point
@@ -597,6 +709,12 @@ public actor LyraCoordinator {
         }
 
         let didAct = await invoke(command, on: target)
+        if didAct && (command == .activate || command == .doubleClick) {
+            let centre = LyraPoint(x: target.frame.midX, y: target.frame.midY)
+            let normX = centre.x / max(screenSize.width, 1.0)
+            let normY = centre.y / max(screenSize.height, 1.0)
+            registerPassiveClick(atNormalized: (x: normX, y: normY))
+        }
 
         // The screen almost always changed as a result, so the cached list is stale.
         await refreshTargets()

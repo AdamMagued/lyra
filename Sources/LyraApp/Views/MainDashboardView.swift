@@ -1,74 +1,122 @@
 import SwiftUI
 import LyraCore
 
-/// The control window: turn it on, calibrate it, and see what it thinks it is doing.
+/// Main control window: Emil Kowalski / Apple-grade minimalist macOS dashboard.
+///
+/// Principles:
+/// - Monochromatic zinc/graphite/white palette with zero garish colors.
+/// - Hairline 0.5pt borders (`Color.white.opacity(0.08)`).
+/// - Continuous squircle radii (`style: .continuous`).
+/// - SF Pro typography with tabular figures.
+/// - Tactile spring animations.
 struct MainDashboardView: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var snapshot: LyraSnapshot { viewModel.snapshot }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            statusRow
-            Divider()
-            controls
-            Divider()
-            diagnostics
-            Spacer(minLength: 0)
-            footer
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                headerBar
+                modeSelectorBar
+                primaryActionsBar
+                settingsGrid
+                telemetrySection
+                permissionsBar
+                footerNotes
+            }
+            .padding(24)
         }
-        .padding(20)
-        .frame(minWidth: 460, minHeight: 520)
+        .background(Color(red: 0.07, green: 0.07, blue: 0.08).ignoresSafeArea())
+        .frame(minWidth: 480, idealWidth: 520, minHeight: 640)
     }
 
-    // MARK: - Status
+    // MARK: - Header Bar
 
-    private var statusRow: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(stateColour.opacity(0.18))
-                    .frame(width: 44, height: 44)
-                Image(systemName: stateSymbol)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(stateColour)
-            }
+    private var headerBar: some View {
+        HStack(alignment: .center, spacing: 16) {
+            // App Branding & State Icon
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(statusColor.opacity(0.14))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(statusColor.opacity(0.3), lineWidth: 0.5)
+                        )
+                    Image(systemName: statusSymbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(statusColor)
+                }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(snapshot.trackingState.description)
-                    .font(.system(size: 17, weight: .semibold))
-                Text(snapshot.statusMessage)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Lyra")
+                            .font(.system(size: 16, weight: .semibold, design: .default))
+                            .foregroundStyle(.white)
+                        Text("v0.1")
+                            .font(.system(size: 11, weight: .medium, design: .default).monospacedDigit())
+                            .foregroundStyle(Color(red: 0.5, green: 0.5, blue: 0.52))
+                    }
+                    Text(snapshot.statusMessage)
+                        .font(.system(size: 11, design: .default))
+                        .foregroundStyle(Color(red: 0.65, green: 0.65, blue: 0.68))
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(viewModel.isCalibrated
-                     ? String(format: "±%.0f px", viewModel.calibrationMap.validationErrorPixels)
-                     : "uncalibrated")
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
-                    .foregroundStyle(viewModel.isCalibrated ? .green : .orange)
-                Text("\(snapshot.targetCount) targets")
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.secondary)
+            // Precision Badge Pill
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+
+                if viewModel.steeringMode == .noseOnly {
+                    Text("Zero-Jitter Head")
+                        .font(.system(size: 12, weight: .medium, design: .default))
+                        .foregroundStyle(.white)
+                } else if viewModel.isCalibrated {
+                    Text(String(format: "±%.0f px", viewModel.calibrationMap.validationErrorPixels))
+                        .font(.system(size: 12, weight: .semibold, design: .default).monospacedDigit())
+                        .foregroundStyle(.white)
+                } else {
+                    Text("Uncalibrated")
+                        .font(.system(size: 12, weight: .medium, design: .default))
+                        .foregroundStyle(Color(red: 0.95, green: 0.65, blue: 0.25))
+                }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.04))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
         }
     }
 
-    private var stateColour: Color {
+    private var statusColor: Color {
         switch snapshot.trackingState {
-        case .tracking: return .green
-        case .calibrating: return .blue
-        case .blinking, .uncalibrated: return .orange
-        case .faceLost, .error: return .red
-        case .idle: return .secondary
+        case .tracking:
+            return Color(red: 0.22, green: 0.78, blue: 0.48)
+        case .calibrating:
+            return Color(red: 0.75, green: 0.75, blue: 0.78)
+        case .blinking, .uncalibrated:
+            return Color(red: 0.95, green: 0.65, blue: 0.25)
+        case .faceLost, .error:
+            return Color(red: 0.92, green: 0.35, blue: 0.35)
+        case .idle:
+            return Color(red: 0.5, green: 0.5, blue: 0.52)
         }
     }
 
-    private var stateSymbol: String {
+    private var statusSymbol: String {
         switch snapshot.trackingState {
         case .tracking: return "eye"
         case .calibrating: return "scope"
@@ -80,169 +128,350 @@ struct MainDashboardView: View {
         }
     }
 
-    // MARK: - Controls
+    // MARK: - Mode Selector
 
-    private var controls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Button(snapshot.isEngineRunning ? "Stop" : "Start") {
-                    viewModel.toggleEngine()
+    private var modeSelectorBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Steering Mode", selection: $viewModel.steeringMode) {
+                Text("Nose Pointer (Zero Jitter)").tag(NoseFineTuneController.Mode.noseOnly)
+                Text("Hybrid (Eye + Nose)").tag(NoseFineTuneController.Mode.hybrid)
+                Text("Eye Only (WebGazer)").tag(NoseFineTuneController.Mode.gazeOnly)
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    // MARK: - Action Buttons
+
+    private var primaryActionsBar: some View {
+        HStack(spacing: 10) {
+            // Start / Stop Toggle
+            Button(action: { viewModel.toggleEngine() }) {
+                HStack(spacing: 7) {
+                    Image(systemName: snapshot.isEngineRunning ? "stop.fill" : "play.fill")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(snapshot.isEngineRunning ? "Stop Engine" : "Start Engine")
+                        .font(.system(size: 13, weight: .semibold, design: .default))
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isCalibrating)
-
-                // Not gated on the engine running. `beginCalibration` starts it itself, so
-                // requiring the user to press Start first was a rule with no reason behind
-                // it — and it presented as a dead button with nothing saying why.
-                Button(viewModel.isCalibrated ? "Recalibrate" : "Calibrate") {
-                    viewModel.startCalibration()
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isCalibrating)
-
-                Spacer()
-
-                Toggle("Magnify", isOn: $viewModel.autoLensEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .help("Open the lens automatically when your gaze settles on a cluster of small controls")
-
-                Toggle("Overlay", isOn: $viewModel.showGazeOverlay)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
             }
+            .buttonStyle(ZincProminentButtonStyle())
+            .disabled(viewModel.isCalibrating)
 
-            if let error = viewModel.calibrationError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-            }
-
-            if let reason = viewModel.calibrationInvalidReason {
-                Label(reason, systemImage: "display.trianglebadge.exclamationmark")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-            }
-
-            if snapshot.isEngineRunning {
-                HStack(spacing: 8) {
-                    Button(snapshot.isSelectionModeActive ? "Stop selecting" : "Start selecting") {
-                        viewModel.send(snapshot.isSelectionModeActive ? .stopTracking : .startTracking)
+            // Recenter or Calibrate Button
+            if viewModel.steeringMode == .noseOnly {
+                Button(action: { viewModel.recenterNose() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "scope")
+                            .font(.system(size: 12))
+                        Text("Recenter (C)")
+                            .font(.system(size: 13, weight: .medium, design: .default))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-
-                    Button("Show targets") { viewModel.send(.showTargets) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                    Button("Hide") { viewModel.send(.hideTargets) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                    Button("Click") { viewModel.send(.activate) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                 }
+                .buttonStyle(ZincSecondaryButtonStyle())
+                .keyboardShortcut("c", modifiers: [])
+                .help("Recenter the pointer to your current neutral head position (or press 'C')")
+            } else {
+                Button(action: { viewModel.startCalibration() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "scope")
+                            .font(.system(size: 12))
+                        Text(viewModel.isCalibrated ? "Recalibrate" : "Calibrate (9-Point)")
+                            .font(.system(size: 13, weight: .medium, design: .default))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(ZincSecondaryButtonStyle())
+                .disabled(viewModel.isCalibrating)
             }
         }
     }
 
-    // MARK: - Diagnostics
+    // MARK: - Settings Grid
 
-    private var diagnostics: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Voice")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+    private var settingsGrid: some View {
+        VStack(spacing: 12) {
+            // Card 1: Features & Online Training
+            VStack(spacing: 12) {
+                HStack {
+                    settingToggleRow(
+                        title: "AutoLens Magnify",
+                        subtitle: "Cluster zoom on small controls",
+                        isOn: $viewModel.autoLensEnabled
+                    )
+                    Divider()
+                        .frame(height: 32)
+                        .background(Color.white.opacity(0.06))
+                    settingToggleRow(
+                        title: "Gaze Indicator",
+                        subtitle: "On-screen reticle overlay",
+                        isOn: $viewModel.showGazeOverlay
+                    )
+                }
 
-            HStack(alignment: .top, spacing: 8) {
-                Text("\u{201C}\(snapshot.lastTranscript)\u{201D}")
-                    .font(.system(size: 12))
-                    .lineLimit(2)
-                Spacer()
-                if let command = snapshot.lastCommand {
-                    Text(commandName(command))
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                Divider()
+                    .background(Color.white.opacity(0.06))
+
+                HStack {
+                    settingToggleRow(
+                        title: "Sync System Mouse",
+                        subtitle: "Warp macOS cursor to gaze",
+                        isOn: $viewModel.syncSystemCursor
+                    )
+                    Divider()
+                        .frame(height: 32)
+                        .background(Color.white.opacity(0.06))
+                    settingToggleRow(
+                        title: "Continuous Learning",
+                        subtitle: "Refine model from user clicks",
+                        isOn: $viewModel.continuousTrainingEnabled
+                    )
                 }
             }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
 
-            if let selection = snapshot.selection {
-                HStack(spacing: 8) {
-                    Image(systemName: "scope")
-                    Text(selection.candidate.displayName)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                    if snapshot.committedTarget != nil {
-                        Text("committed")
-                            .font(.system(size: 10))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.2), in: Capsule())
-                            .foregroundStyle(.green)
+            // Card 2: Sensitivity & Axis Inversion (When Head / Nose enabled)
+            if viewModel.steeringMode != .gazeOnly {
+                HStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Head Sensitivity")
+                                .font(.system(size: 12, weight: .medium, design: .default))
+                                .foregroundStyle(Color(red: 0.88, green: 0.88, blue: 0.90))
+                            Spacer()
+                            Text(String(format: "%.1f×", viewModel.noseSensitivity))
+                                .font(.system(size: 12, weight: .semibold, design: .default).monospacedDigit())
+                                .foregroundStyle(.white)
+                        }
+                        Slider(value: $viewModel.noseSensitivity, in: 0.5...4.5, step: 0.1)
+                            .controlSize(.small)
+                    }
+
+                    HStack(spacing: 12) {
+                        Toggle("Invert X", isOn: $viewModel.invertNoseX)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: 11, design: .default))
+
+                        Toggle("Invert Y", isOn: $viewModel.invertNoseY)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: 11, design: .default))
+                    }
+                    .foregroundStyle(Color(red: 0.75, green: 0.75, blue: 0.78))
+                }
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
+            }
+        }
+    }
+
+    private func settingToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium, design: .default))
+                    .foregroundStyle(Color(red: 0.88, green: 0.88, blue: 0.90))
+                Text(subtitle)
+                    .font(.system(size: 10, design: .default))
+                    .foregroundStyle(Color(red: 0.55, green: 0.55, blue: 0.58))
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: isOn)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .accessibilityLabel(title)
+        }
+    }
+
+    // MARK: - Telemetry & Vision Diagnostics
+
+    private var telemetrySection: some View {
+        VStack(spacing: 12) {
+            if let preview = viewModel.previewImage {
+                HStack(spacing: 16) {
+                    // Preview Frame
+                    Image(decorative: preview, scale: 1.0)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 140, height: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                        )
+
+                    // Vision Telemetry Specs
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(snapshot.trackingState == .tracking ? Color(red: 0.22, green: 0.78, blue: 0.48) : Color(red: 0.95, green: 0.65, blue: 0.25))
+                                .frame(width: 6, height: 6)
+                            Text("Facial Geometry Tracking")
+                                .font(.system(size: 12, weight: .semibold, design: .default))
+                                .foregroundStyle(.white)
+                        }
+
+                        Text(viewModel.steeringMode == .noseOnly
+                            ? "Tracking rigid nose landmarks. Deadband locks resting position for zero-jitter control."
+                            : "WebGazer polynomial mapping from ocular features to screen coordinates.")
+                            .font(.system(size: 11, design: .default))
+                            .foregroundStyle(Color(red: 0.65, green: 0.65, blue: 0.68))
+                            .lineLimit(3)
+
+                        HStack(spacing: 12) {
+                            Text("\(snapshot.targetCount) targets active")
+                                .font(.system(size: 11, weight: .medium, design: .default).monospacedDigit())
+                                .foregroundStyle(Color(red: 0.55, green: 0.55, blue: 0.58))
+
+                            if snapshot.isZoomed {
+                                Text("AutoLens Magnified")
+                                    .font(.system(size: 10, weight: .medium, design: .default))
+                                    .foregroundStyle(Color(red: 0.22, green: 0.78, blue: 0.48))
+                            }
+                        }
                     }
                     Spacer()
-                    if let dwell = snapshot.dwellProgress {
-                        ProgressView(value: dwell)
-                            .frame(width: 70)
+                }
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
+            }
+
+            // Voice & Selection Telemetry Row
+            HStack(spacing: 16) {
+                // Voice Status
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(red: 0.6, green: 0.6, blue: 0.62))
+                    Text(snapshot.lastTranscript.isEmpty ? "Voice ready" : "\u{201C}\(snapshot.lastTranscript)\u{201D}")
+                        .font(.system(size: 12, design: .default))
+                        .foregroundStyle(Color(red: 0.8, green: 0.8, blue: 0.82))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if let command = snapshot.lastCommand {
+                    Text(commandName(command))
+                        .font(.system(size: 11, weight: .medium, design: .default))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                }
+
+                if let selection = snapshot.selection {
+                    HStack(spacing: 6) {
+                        Image(systemName: "scope")
+                            .font(.system(size: 10))
+                        Text(selection.candidate.displayName)
+                            .font(.system(size: 11, weight: .medium, design: .default))
+                            .lineLimit(1)
                     }
+                    .foregroundStyle(Color(red: 0.22, green: 0.78, blue: 0.48))
                 }
             }
-
-            permissionRow
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(red: 0.10, green: 0.10, blue: 0.11))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
         }
     }
 
-    private var permissionRow: some View {
-        HStack(spacing: 6) {
-            permission("Camera", viewModel.cameraGranted)
-            permission("Mic", viewModel.microphoneGranted)
-            permission("Speech", viewModel.speechGranted)
-            permission("Accessibility", viewModel.accessibilityGranted)
+    // MARK: - Permissions Row
+
+    private var permissionsBar: some View {
+        HStack(spacing: 8) {
+            permissionPill("Camera", viewModel.cameraGranted)
+            permissionPill("Mic", viewModel.microphoneGranted)
+            permissionPill("Speech", viewModel.speechGranted)
+            permissionPill("Accessibility", viewModel.accessibilityGranted)
+
+            Spacer()
 
             if !viewModel.accessibilityGranted || !viewModel.cameraGranted {
-                Button("Grant") { viewModel.requestPermissions() }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11))
+                Button("Grant Permissions") {
+                    viewModel.requestPermissions()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold, design: .default))
+                .foregroundStyle(Color(red: 0.95, green: 0.65, blue: 0.25))
             }
         }
     }
 
-    private func permission(_ name: String, _ granted: Bool) -> some View {
-        HStack(spacing: 3) {
+    private func permissionPill(_ name: String, _ granted: Bool) -> some View {
+        HStack(spacing: 5) {
             Circle()
-                .fill(granted ? Color.green : Color.secondary.opacity(0.4))
-                .frame(width: 6, height: 6)
+                .fill(granted ? Color(red: 0.22, green: 0.78, blue: 0.48) : Color.white.opacity(0.2))
+                .frame(width: 5, height: 5)
             Text(name)
-                .font(.system(size: 10))
-                .foregroundStyle(granted ? .primary : .secondary)
+                .font(.system(size: 11, design: .default))
+                .foregroundStyle(granted ? Color(red: 0.88, green: 0.88, blue: 0.90) : Color(red: 0.5, green: 0.5, blue: 0.52))
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(Color.secondary.opacity(0.08), in: Capsule())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.04))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
+        )
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Say \u{201C}cursor\u{201D} \u{2192} look \u{2192} \u{201C}click\u{201D}.  \u{201C}next\u{201D} fixes a wrong pick, \u{201C}zoom\u{201D} magnifies, \u{201C}stop\u{201D} halts.")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+    // MARK: - Footer
 
-            if !viewModel.isStageManagerOn {
-                Text("Stage Manager is off — turn it on to select window thumbnails.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-            }
+    private var footerNotes: some View {
+        HStack {
+            Text("Shortcuts: C to recenter • ESC to exit • Space to trigger")
+                .font(.system(size: 11, design: .default))
+                .foregroundStyle(Color(red: 0.62, green: 0.62, blue: 0.65))
+
+            Spacer()
 
             if viewModel.isCalibrated {
-                Button("Forget calibration") { viewModel.resetCalibration() }
-                    .buttonStyle(.link)
-                    .font(.system(size: 10))
+                Button("Reset Calibration") {
+                    viewModel.resetCalibration()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, design: .default))
+                .foregroundStyle(Color(red: 0.65, green: 0.65, blue: 0.68))
             }
         }
+        .padding(.top, 4)
     }
 
     private func commandName(_ command: LyraCommand) -> String {
@@ -262,7 +491,41 @@ struct MainDashboardView: View {
         case .cancel: return "cancel"
         case .confirm: return "confirm"
         case .deny: return "deny"
-        case .unrecognized(let text): return "heard: \(text.prefix(20))"
+        case .unrecognized(let text): return "heard: \(text.prefix(15))"
         }
+    }
+}
+
+// MARK: - Minimalist Zinc Button Styles
+
+private struct ZincProminentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold, design: .default))
+            .foregroundStyle(Color.black)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.85 : 1.0))
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+private struct ZincSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .medium, design: .default))
+            .foregroundStyle(Color(red: 0.88, green: 0.88, blue: 0.90))
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.08 : 0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }

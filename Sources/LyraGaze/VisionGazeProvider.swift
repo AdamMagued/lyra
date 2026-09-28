@@ -59,12 +59,6 @@ public final class VisionGazeProvider: NSObject, GazeProvider, @unchecked Sendab
     private let analysisInFlight = NSLock()
     private var isAnalysing = false
 
-    /// Previously detected face, in Vision image-normalised coordinates, used to build
-    /// the next frame's region of interest.
-    private let regionLock = NSLock()
-    private var trackedFaceRegion: CGRect?
-    private var framesSinceFaceSeen = 0
-
     private let stateLock = NSLock()
     private var extractor = FaceFeatureExtractor()
     private var configured = false
@@ -135,12 +129,6 @@ public final class VisionGazeProvider: NSObject, GazeProvider, @unchecked Sendab
         extractor.reset()
     }
 
-    private func resetRegionTracking() {
-        regionLock.lock(); defer { regionLock.unlock() }
-        trackedFaceRegion = nil
-        framesSinceFaceSeen = 0
-    }
-
     private func setRunning(_ value: Bool, facePresent present: Bool? = nil) {
         stateLock.lock(); defer { stateLock.unlock() }
         running = value
@@ -157,7 +145,6 @@ public final class VisionGazeProvider: NSObject, GazeProvider, @unchecked Sendab
         try await requestCameraAccess()
 
         resetExtractor()
-        resetRegionTracking()
 
         try configureSessionIfNeeded()
 
@@ -211,9 +198,10 @@ public final class VisionGazeProvider: NSObject, GazeProvider, @unchecked Sendab
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
 
-        // 720p is the sweet spot: enough pixels on the iris for pupil localisation,
-        // without the USB bandwidth and per-frame cost of 1080p.
-        if captureSession.canSetSessionPreset(.hd1280x720) {
+        // Prefer 1080p for 2.25x more pixels across the iris and pupil, fallback to 720p
+        if captureSession.canSetSessionPreset(.hd1920x1080) {
+            captureSession.sessionPreset = .hd1920x1080
+        } else if captureSession.canSetSessionPreset(.hd1280x720) {
             captureSession.sessionPreset = .hd1280x720
         } else if captureSession.canSetSessionPreset(.high) {
             captureSession.sessionPreset = .high
@@ -229,12 +217,14 @@ public final class VisionGazeProvider: NSObject, GazeProvider, @unchecked Sendab
         cameraIDStorage = camera.uniqueID
         stateLock.unlock()
 
-        // Prefer a frame rate that leaves headroom for analysis. Chasing 60 fps here
-        // just produces frames the analyser cannot keep up with.
+        // Configure 30 fps capture and continuous auto-exposure
         try? camera.lockForConfiguration()
         if camera.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.maxFrameRate >= 30 }) {
             camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
             camera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
+        }
+        if camera.isExposureModeSupported(.continuousAutoExposure) {
+            camera.exposureMode = .continuousAutoExposure
         }
         camera.unlockForConfiguration()
 
@@ -291,10 +281,9 @@ extension VisionGazeProvider: AVCaptureVideoDataOutputSampleBufferDelegate {
         isAnalysing = true
         analysisInFlight.unlock()
 
-        let region = currentRegionOfInterest()
         analysisQueue.async { [weak self] in
             guard let self else { return }
-            self.analyse(pixelBuffer: pixelBuffer, region: region)
+            self.analyse(pixelBuffer: pixelBuffer)
 
             self.analysisInFlight.lock()
             self.isAnalysing = false
@@ -302,34 +291,33 @@ extension VisionGazeProvider: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
-    private func analyse(pixelBuffer: CVPixelBuffer, region: CGRect?) {
-        let request = VNDetectFaceLandmarksRequest()
-        request.revision = VNDetectFaceLandmarksRequestRevision3
-        if let region { request.regionOfInterest = region }
+    private func analyse(pixelBuffer: CVPixelBuffer) {
+        let rectRequest = VNDetectFaceRectanglesRequest()
+        let landmarkRequest = VNDetectFaceLandmarksRequest()
+        landmarkRequest.revision = VNDetectFaceLandmarksRequestRevision3
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         do {
-            try handler.perform([request])
+            try handler.perform([rectRequest, landmarkRequest])
         } catch {
             return
         }
 
-        guard let observations = request.results, !observations.isEmpty else {
+        guard let landmarkObservations = landmarkRequest.results, !landmarkObservations.isEmpty else {
             markFaceAbsent()
             return
         }
 
-        // When searching a cropped region, prefer the largest face; when searching the
-        // whole frame, the largest face is the user's.
-        guard let face = observations.max(by: { $0.boundingBox.height < $1.boundingBox.height }) else {
+        // The user's face is the largest face detected in the frame.
+        guard let face = landmarkObservations.max(by: { $0.boundingBox.height < $1.boundingBox.height }) else {
             markFaceAbsent()
             return
         }
 
-        updateTrackedRegion(face.boundingBox)
+        let rectFace = rectRequest.results?.max(by: { $0.boundingBox.height < $1.boundingBox.height })
 
         stateLock.lock()
-        let features = extractor.extract(from: face)
+        let features = extractor.extract(from: face, poseSource: rectFace)
         facePresent = true
         stateLock.unlock()
 
@@ -341,34 +329,6 @@ extension VisionGazeProvider: AVCaptureVideoDataOutputSampleBufferDelegate {
         stateLock.lock()
         facePresent = false
         stateLock.unlock()
-
-        regionLock.lock()
-        framesSinceFaceSeen += 1
-        // Give up on the tracked region after a second of nothing, so the search
-        // widens again instead of staring at an empty patch of wall.
-        if framesSinceFaceSeen > 30 { trackedFaceRegion = nil }
-        regionLock.unlock()
-    }
-
-    private func currentRegionOfInterest() -> CGRect? {
-        regionLock.lock()
-        defer { regionLock.unlock() }
-        guard let trackedFaceRegion else { return nil }
-        // Vision requires the ROI to lie inside the unit square.
-        return trackedFaceRegion.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-    }
-
-    private func updateTrackedRegion(_ boundingBox: CGRect) {
-        // Expand generously so a normal head movement does not immediately fall outside
-        // the tracked box and cost a full-frame re-detection.
-        let expanded = boundingBox.insetBy(
-            dx: -boundingBox.width * 0.45,
-            dy: -boundingBox.height * 0.45
-        )
-        regionLock.lock()
-        trackedFaceRegion = expanded.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-        framesSinceFaceSeen = 0
-        regionLock.unlock()
     }
 
     /// Produces a small preview image. Downscaling here rather than drawing full

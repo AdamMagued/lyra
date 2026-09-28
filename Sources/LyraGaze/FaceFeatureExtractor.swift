@@ -25,12 +25,15 @@ public struct FaceFeatureExtractor: Sendable {
 
     /// Slow-moving per-user baseline for how tall an open eye looks, so openness is
     /// judged relative to this person's face rather than a fixed constant.
-    private var opennessBaseline = AdaptiveBaseline(initial: 0.32, adaptationRate: 0.02, floor: 0.10)
+    private var opennessBaseline = AdaptiveBaseline(initial: 0.25, adaptationRate: 0.02, floor: 0.08)
 
     public init() {}
 
     /// Extracts features, or returns `nil` when the frame cannot support a measurement.
-    public mutating func extract(from observation: VNFaceObservation) -> GazeFeatures? {
+    public mutating func extract(
+        from observation: VNFaceObservation,
+        poseSource: VNFaceObservation? = nil
+    ) -> GazeFeatures? {
         let boundingBox = observation.boundingBox
         guard boundingBox.width > 0.06, boundingBox.height > 0.06 else { return nil }
         guard let landmarks = observation.landmarks,
@@ -70,6 +73,55 @@ public struct FaceFeatureExtractor: Sendable {
         let imageRight = toImageSpace(rightCentre, boundingBox: boundingBox)
         let iod = Double(hypot(imageRight.x - imageLeft.x, imageRight.y - imageLeft.y))
 
+        // High-precision rigid skull-anchored head pose:
+        // By building an orthonormal basis from the outer corners of the eyes directly in
+        // face space, bounding box translation and scale breathing cancel out completely.
+        // In Vision 2D landmarks:
+        // - leftEye points belong to face's left eye (camera's right side, larger x).
+        // - rightEye points belong to face's right eye (camera's left side, smaller x).
+        let cL = leftEye.max(by: { $0.x < $1.x }) ?? leftCentre
+        let cR = rightEye.min(by: { $0.x < $1.x }) ?? rightCentre
+
+        let skullMidX = Double(cL.x + cR.x) / 2.0
+        let skullMidY = Double(cL.y + cR.y) / 2.0
+
+        let skullDx = Double(cL.x - cR.x)
+        let skullDy = Double(cL.y - cR.y)
+        let skullBaseline = hypot(skullDx, skullDy)
+        let safeBaseline = max(skullBaseline, 1e-4)
+
+        // Orthonormal frame (u: along eye line from right to left; v: upward perpendicular)
+        let ux = skullDx / safeBaseline
+        let uy = skullDy / safeBaseline
+        let vx = -uy
+        let vy = ux
+
+        let noseTip = landmarks.noseCrest?.normalizedPoints.last
+            ?? landmarks.nose?.normalizedPoints.first
+
+        let landmarkYaw: Double
+        let landmarkPitch: Double
+        if let noseTip {
+            let toNoseX = Double(noseTip.x) - skullMidX
+            let toNoseY = Double(noseTip.y) - skullMidY
+
+            let projX = (toNoseX * ux + toNoseY * uy) / safeBaseline
+            let projY = (toNoseX * vx + toNoseY * vy) / safeBaseline
+
+            // Yaw: turning right moves nose to camera left -> projX decreases -> -projX increases (positive)
+            landmarkYaw = -projX
+            // Pitch: tilting up moves nose higher in image -> projY increases (positive), nodding down -> projY decreases (negative)
+            landmarkPitch = projY
+        } else {
+            landmarkYaw = poseSource?.yaw?.doubleValue ?? observation.yaw?.doubleValue ?? 0.0
+            landmarkPitch = poseSource?.pitch?.doubleValue ?? observation.pitch?.doubleValue ?? 0.0
+        }
+        let landmarkRoll = Double(atan2(imageRight.y - imageLeft.y, imageRight.x - imageLeft.x))
+
+        let yaw = noseTip != nil ? landmarkYaw : (poseSource?.yaw?.doubleValue ?? observation.yaw?.doubleValue ?? 0.0)
+        let pitch = noseTip != nil ? landmarkPitch : (poseSource?.pitch?.doubleValue ?? observation.pitch?.doubleValue ?? 0.0)
+        let roll = landmarkRoll
+
         // A single detected pupil is real signal, just noisier than two.
         let pupilConfidence = pupilXValues.count == 2 ? 1.0 : 0.7
         let detectionConfidence = Double(observation.confidence)
@@ -77,9 +129,9 @@ public struct FaceFeatureExtractor: Sendable {
         return GazeFeatures(
             pupilX: pupilXValues.reduce(0, +) / Double(pupilXValues.count),
             pupilY: pupilYValues.reduce(0, +) / Double(pupilYValues.count),
-            yaw: Double(observation.yaw?.doubleValue ?? 0),
-            pitch: Double(observation.pitch?.doubleValue ?? 0),
-            roll: Double(observation.roll?.doubleValue ?? 0),
+            yaw: yaw,
+            pitch: pitch,
+            roll: roll,
             faceX: Double(boundingBox.midX),
             faceY: Double(boundingBox.midY),
             iod: iod,
@@ -93,7 +145,7 @@ public struct FaceFeatureExtractor: Sendable {
     /// Resets per-user baselines. Called when tracking restarts so a stale baseline from
     /// a previous session or a different person does not leak in.
     public mutating func reset() {
-        opennessBaseline = AdaptiveBaseline(initial: 0.32, adaptationRate: 0.02, floor: 0.10)
+        opennessBaseline = AdaptiveBaseline(initial: 0.25, adaptationRate: 0.02, floor: 0.08)
     }
 
     // MARK: - Eye geometry
@@ -137,13 +189,9 @@ public struct FaceFeatureExtractor: Sendable {
         let along = (toPupilX * axisX + toPupilY * axisY) / axisLengthSquared
 
         // The perpendicular component. Dividing by the *square* of the axis length is
-        // correct here, and is easy to mistake for a bug: `perpendicularExtent` also
-        // divides its offsets by the axis length and then projects onto an already-unit
-        // axis, so its extents come out in units of `perpDistance / axisLength` too.
-        // Both sides of the subtraction below are in that unit, and the ratio is a clean
-        // 0...1 fraction of the eye's opening. Dividing by `axisLength` instead shrinks
-        // the numerator by `1/axisLength` (~5x for a real eye) and squashes all vertical
-        // travel into the middle of the range.
+        // correct here: `perpendicularExtent` also divides its offsets by the axis length
+        // and then projects onto an already-unit axis, so its extents come out in units
+        // of `perpDistance / axisLength` too.
         let axisLength = axisLengthSquared.squareRoot()
         let perpendicular = (toPupilX * -axisY + toPupilY * axisX) / axisLengthSquared
 
@@ -154,15 +202,17 @@ public struct FaceFeatureExtractor: Sendable {
         return EyeMeasurement(
             normalizedX: min(max(along, 0.0), 1.0),
             normalizedY: min(max(normalizedY, 0.0), 1.0),
-            openness: verticalSpan / max(axisLength, 1e-4)
+            openness: verticalSpan
         )
     }
 
     /// Finds the two contour points furthest apart — the eye corners.
     ///
-    /// Using an exhaustive search rather than, say, the leftmost and rightmost points is
-    /// deliberate: with a tilted or partially occluded eye the extreme-x points can both
-    /// land on the same corner, which would collapse the local frame.
+    /// The returned pair is canonicalized so `cornerA` is always the corner with smaller X
+    /// (the left corner in face space) and `cornerB` has larger X (the right corner in face space).
+    /// This guarantees that the corner axis points in the same direction for both eyes and
+    /// frame-to-frame, preventing the left and right eyes from having opposite sign and canceling
+    /// each other's gaze movement out when averaged.
     static func extremalCorners(of contour: [CGPoint]) -> (CGPoint, CGPoint)? {
         guard contour.count >= 3 else { return nil }
         var best: (CGPoint, CGPoint)?
@@ -179,7 +229,11 @@ public struct FaceFeatureExtractor: Sendable {
                 }
             }
         }
-        return best
+        guard var (cornerA, cornerB) = best else { return nil }
+        if cornerA.x > cornerB.x || (cornerA.x == cornerB.x && cornerA.y > cornerB.y) {
+            swap(&cornerA, &cornerB)
+        }
+        return (cornerA, cornerB)
     }
 
     /// Min and max of the contour projected onto the axis perpendicular to the corner line.

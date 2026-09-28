@@ -70,8 +70,8 @@ final class FaceFeatureExtractorTests: XCTestCase {
         let top = measure(pupil: CGPoint(x: 0.5, y: 0.5 + halfHeight))?.normalizedY
         let bottom = measure(pupil: CGPoint(x: 0.5, y: 0.5 - halfHeight))?.normalizedY
 
-        XCTAssertEqual(top ?? -1, 0.0, accuracy: 0.05)
-        XCTAssertEqual(bottom ?? -1, 1.0, accuracy: 0.05)
+        XCTAssertEqual(top ?? -1, 1.0, accuracy: 0.05)
+        XCTAssertEqual(bottom ?? -1, 0.0, accuracy: 0.05)
     }
 
     func testVerticalResponseIsLinearAndSymmetricAboutTheCentre() {
@@ -80,8 +80,8 @@ final class FaceFeatureExtractorTests: XCTestCase {
         let quarter = measure(pupil: CGPoint(x: 0.5, y: 0.5 + halfHeight / 2))?.normalizedY
         let threeQuarters = measure(pupil: CGPoint(x: 0.5, y: 0.5 - halfHeight / 2))?.normalizedY
 
-        XCTAssertEqual(quarter ?? -1, 0.25, accuracy: 0.05)
-        XCTAssertEqual(threeQuarters ?? -1, 0.75, accuracy: 0.05)
+        XCTAssertEqual(quarter ?? -1, 0.75, accuracy: 0.05)
+        XCTAssertEqual(threeQuarters ?? -1, 0.25, accuracy: 0.05)
     }
 
     // MARK: - Horizontal
@@ -97,6 +97,64 @@ final class FaceFeatureExtractorTests: XCTestCase {
             y: Double(a.y) + (Double(b.y) - Double(a.y)) * 0.25
         )
         XCTAssertEqual(measure(pupil: quarter)?.normalizedX ?? -1, 0.25, accuracy: 0.03)
+    }
+
+    // MARK: - Two-eye consistency
+
+    func testBothEyesAgreeOnGazeDirection() {
+        // In Vision, leftEye and rightEye landmark points are returned in opposite winding order.
+        // Canonicalizing the corners ensures that moving the eyes in a given direction shifts
+        // both eye measurements in the same direction, preventing them from canceling each other out.
+        let extractor = FaceFeatureExtractor()
+
+        let leftContour = [
+            CGPoint(x: 0.20, y: 0.68),
+            CGPoint(x: 0.25, y: 0.70),
+            CGPoint(x: 0.31, y: 0.71),
+            CGPoint(x: 0.36, y: 0.70),
+            CGPoint(x: 0.31, y: 0.68),
+            CGPoint(x: 0.25, y: 0.67)
+        ]
+        let leftPupil = CGPoint(x: 0.28, y: 0.69)
+
+        let rightContour = [
+            CGPoint(x: 0.72, y: 0.75),
+            CGPoint(x: 0.67, y: 0.76),
+            CGPoint(x: 0.61, y: 0.75),
+            CGPoint(x: 0.56, y: 0.73),
+            CGPoint(x: 0.61, y: 0.72),
+            CGPoint(x: 0.68, y: 0.73)
+        ]
+        let rightPupil = CGPoint(x: 0.64, y: 0.74)
+
+        guard let leftBase = extractor.eyeGeometry(contour: leftContour, pupil: leftPupil, boundingBox: .zero),
+              let rightBase = extractor.eyeGeometry(contour: rightContour, pupil: rightPupil, boundingBox: .zero) else {
+            return XCTFail("Failed to measure base eye geometries")
+        }
+
+        // Shift gaze to the right (+0.02)
+        guard let leftRightShift = extractor.eyeGeometry(contour: leftContour, pupil: CGPoint(x: leftPupil.x + 0.02, y: leftPupil.y), boundingBox: .zero),
+              let rightRightShift = extractor.eyeGeometry(contour: rightContour, pupil: CGPoint(x: rightPupil.x + 0.02, y: rightPupil.y), boundingBox: .zero) else {
+            return XCTFail("Failed to measure right-shifted eye geometries")
+        }
+
+        let leftDX = leftRightShift.normalizedX - leftBase.normalizedX
+        let rightDX = rightRightShift.normalizedX - rightBase.normalizedX
+        XCTAssertGreaterThan(leftDX, 0.05, "Left eye must move right")
+        XCTAssertGreaterThan(rightDX, 0.05, "Right eye must move right")
+        XCTAssertEqual(leftDX, rightDX, accuracy: 0.05, "Both eyes must move right by similar amounts")
+
+        // Shift gaze upward (+0.01)
+        guard let leftUpShift = extractor.eyeGeometry(contour: leftContour, pupil: CGPoint(x: leftPupil.x, y: leftPupil.y + 0.01), boundingBox: .zero),
+              let rightUpShift = extractor.eyeGeometry(contour: rightContour, pupil: CGPoint(x: rightPupil.x, y: rightPupil.y + 0.01), boundingBox: .zero) else {
+            return XCTFail("Failed to measure up-shifted eye geometries")
+        }
+
+        let leftDY = leftUpShift.normalizedY - leftBase.normalizedY
+        let rightDY = rightUpShift.normalizedY - rightBase.normalizedY
+        XCTAssertGreaterThan(leftDY, 0.1, "Left eye must move up")
+        XCTAssertGreaterThan(rightDY, 0.1, "Right eye must move up")
+        XCTAssertEqual(leftDY, rightDY, accuracy: 0.1, "Both eyes must move up by similar amounts")
     }
 
     // MARK: - Roll invariance

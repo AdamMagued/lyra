@@ -44,9 +44,13 @@ public final class OverlayWindowManager {
             backing: .buffered,
             defer: false
         )
-        window.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: CalibrationOverlayView(viewModel: viewModel)
         )
+        if #available(macOS 13.0, *) {
+            hostingController.safeAreaRegions = []
+        }
+        window.contentViewController = hostingController
 
         // The size has to be stated *after* the hosting controller is installed.
         //
