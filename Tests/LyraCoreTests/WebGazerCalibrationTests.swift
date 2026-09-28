@@ -346,4 +346,41 @@ final class WebGazerCalibrationTests: XCTestCase {
         XCTAssertNil(map, "Click during eye closure must be safely discarded")
         XCTAssertEqual(trainer.passiveSamples.count, 0)
     }
+
+    func testMacro5PatternPropertiesAndCalibration() {
+        let pattern = CalibrationPattern.macro5
+        XCTAssertEqual(pattern.points.count, 5)
+
+        // 5 macro points: Top Left, Top Right, Left Edge (Stage Manager), Bottom (Dock), Middle
+        XCTAssertEqual(pattern.points[0].x, 0.04, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[0].y, 0.03, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[1].x, 0.96, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[1].y, 0.03, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[2].x, 0.04, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[2].y, 0.50, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[3].x, 0.50, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[3].y, 0.97, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[4].x, 0.50, accuracy: 1e-3)
+        XCTAssertEqual(pattern.points[4].y, 0.50, accuracy: 1e-3)
+
+        let engine = WebGazerCalibration(pattern: pattern, clicksPerPoint: 5)
+        engine.start()
+
+        XCTAssertEqual(engine.totalPointsCount, 5)
+        XCTAssertEqual(engine.requiredClicks, 25)
+        XCTAssertEqual(engine.completedPointsCount, 0)
+        XCTAssertFalse(engine.isAllPointsComplete)
+
+        // Buffer ocular features and register 5 clicks on point 2 (Stage Manager)
+        for _ in 0..<10 {
+            engine.observe(features: makeFeatures(pupilX: 0.05, pupilY: 0.50))
+        }
+        for _ in 0..<5 {
+            XCTAssertTrue(engine.registerClick(pointIndex: 2))
+        }
+
+        XCTAssertEqual(engine.points[2].clicks, 5)
+        XCTAssertTrue(engine.points[2].isComplete)
+        XCTAssertEqual(engine.completedPointsCount, 1)
+    }
 }

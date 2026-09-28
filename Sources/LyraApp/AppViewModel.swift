@@ -581,7 +581,7 @@ public final class AppViewModel: ObservableObject {
     /// Records a direct click on a WebGazer point dot by index.
     public func handleCalibrationClick(pointIndex: Int) {
         guard calibrationStage == .running else { return }
-        if calibrationMode == .webGazer9, let run = webGazerRun {
+        if (calibrationMode == .macroZones5 || calibrationMode == .webGazer9), let run = webGazerRun {
             run.registerClick(pointIndex: pointIndex)
             webGazerProgress = run.progress
             if run.isAllPointsComplete {
@@ -637,7 +637,7 @@ public final class AppViewModel: ObservableObject {
     private func ingest(_ features: GazeFeatures) {
         latestFeatures = features
         guard isCalibrating else { return }
-        if calibrationMode == .webGazer9 {
+        if calibrationMode == .macroZones5 || calibrationMode == .webGazer9 {
             webGazerRun?.observe(features: features)
         } else if calibrationMode == .adaptive {
             adaptiveRun?.observe(features: features)
